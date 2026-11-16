@@ -27,7 +27,9 @@ Core/Src/app_dim.c     TIM8 两路调光 0~100%
 Core/Src/app_dust.c    ADC 采样 → 9 点中位数 → PM 换算 → 回差报警状态机
 Core/Src/app_alarm.c   蜂鸣器 + 状态灯报警指示，ALARM 时自动开排风 CH2
 Core/Src/app_net.c     ESP8266（USART3）AT 联网 + HTTP 服务器，浏览器远程控制
-Core/Src/app_lcd.c     3.5 寸 TFTLCD 显示（FSMC NE4，NT35310，480x320）
+Core/Src/app_lcd.c     3.5 寸 TFTLCD 竖屏显示（FSMC NE4，NT35310，320x480）
+Core/Src/app_touch.c   XPT2046 电阻触摸 + 4 点校准（结果存 Flash）
+Core/Src/app_cfg.c     WiFi 账号掉电保存（Flash sector 10）
 Core/Src/lcd.c         正点原子 TFTLCD 驱动 + font.h 字库
 Core/Src/delay.c       DWT us 延时 / HAL_Delay ms
 Core/Src/app_ui.c      状态显示（暂无屏，先用 USART1 输出一行）
@@ -78,9 +80,7 @@ net <stop|status>     停网络 / 看状态和 IP
    12s PM= 35 TH=150 NORMAL RELAY=0x05 [101000] DIM= 50%/  0% NET=READY 192.168.1.23
 ```
 
-## 远程控制（ESP8266，T8/T9）
-
-```powershell
+## 远程控制（ESP8266，T8/T9）```powershell
 # 串口里
 wifi MyHome_2.4G 12345678
 # → net: joined 'MyHome_2.4G'
@@ -97,8 +97,9 @@ wifi MyHome_2.4G 12345678
 ## 进度
 
 - ✅ 外设配置、CMake 工程、业务代码骨架（编译零告警）
-- ✅ T7 显示：3.5 寸 TFTLCD（NT35310 / 480×320 / FSMC NE4），屏上显示 6 路状态 + PM + 阈值 + 网络
-- ✅ 远程控制：ESP8266 AT 联网 + HTTP 页面控制 6 路继电器 / 调光 / 阈值（T8/T9）
+- ✅ T7 显示：3.5 寸 TFTLCD（NT35310 / 320×480 竖屏 / FSMC NE4），屏上显示 6 路状态 + PM + 阈值 + 网络
+- ✅ 触摸控制：点屏幕方块翻转对应继电器，点 ALL OFF 全断（XPT2046，4 点校准存 Flash）
+- ✅ 远程控制：ESP8266 AT 联网 + HTTP 页面控制 6 路继电器 / 调光 / 阈值（T8/T9）；WiFi 账号掉电保存
 - ⏳ T1~T6、T8~T10 上板实测（逐项验证流程见 [开发指南.md](开发指南.md)）
 
 详细的引脚表、验证步骤、常见坑都在 [开发指南.md](开发指南.md)。
