@@ -50,8 +50,10 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/app_dust.c
     Core/Src/app_alarm.c
     Core/Src/app_cmd.c
+    Core/Src/app_net.c
     Core/Src/app_ui.c
     Core/Src/app_dbg.c
+    Core/Src/app_util.c
 )
 
 # Add include paths

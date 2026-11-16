@@ -18,8 +18,10 @@
 #include "app_dbg.h"
 #include "app_dim.h"
 #include "app_dust.h"
+#include "app_net.h"
 #include "app_relay.h"
 #include "app_ui.h"
+#include "app_util.h"
 #include "usart.h"
 
 #include <string.h>
@@ -36,55 +38,9 @@ static uint8_t  s_rx_byte;
 static char    s_line[CMD_LINE_MAX];
 static uint8_t s_line_len;
 
-/* 支持十进制与 0x 前缀十六进制，越界返回 0 */
-static uint8_t parse_u16(const char *s, uint16_t *out)
-{
-    uint32_t v = 0u;
-    uint32_t base = 10u;
-
-    if (s == NULL || *s == '\0')
-    {
-        return 0u;
-    }
-
-    if (s[0] == '0' && (s[1] == 'x' || s[1] == 'X'))
-    {
-        base = 16u;
-        s += 2;
-    }
-
-    while (*s != '\0')
-    {
-        uint32_t d;
-
-        if (*s >= '0' && *s <= '9')
-        {
-            d = (uint32_t)(*s - '0');
-        }
-        else if (base == 16u && *s >= 'a' && *s <= 'f')
-        {
-            d = (uint32_t)(*s - 'a') + 10u;
-        }
-        else if (base == 16u && *s >= 'A' && *s <= 'F')
-        {
-            d = (uint32_t)(*s - 'A') + 10u;
-        }
-        else
-        {
-            return 0u;
-        }
-
-        v = v * base + d;
-        if (v > 0xFFFFu)
-        {
-            return 0u;
-        }
-        s++;
-    }
-
-    *out = (uint16_t)v;
-    return 1u;
-}
+/* blink <ch>：让某一路以 1 Hz 点动，用来听声音/量通断，blink 0 停止 */
+static uint8_t  s_blink_ch;
+static uint32_t s_blink_tick;
 
 static void cmd_help(void)
 {
@@ -96,7 +52,10 @@ static void cmd_help(void)
               "  toggle <ch>           flip one relay (ch 1-6)\r\n"
               "  dim <ch> <0-100>      dimmer duty in percent (ch 1-2)\r\n"
               "  th <ug/m3>            dust alarm threshold (10-1000)\r\n"
-              "  ui <0|1>              1 Hz status line on/off\r\n");
+              "  ui <0|1>              1 Hz status line on/off\r\n"
+              "  blink <ch>            toggle one relay at 1 Hz (0 = stop)\r\n"
+              "  wifi <ssid> <pwd>     join AP, start HTTP server on port 80\r\n"
+              "  net <stop|status>     stop network / show state and IP\r\n");
 }
 
 static void cmd_exec(char *line)
@@ -144,7 +103,7 @@ static void cmd_exec(char *line)
     }
     else if (strcmp(argv[0], "mode") == 0)
     {
-        if (argc < 2u || !parse_u16(argv[1], &v) || v > 0x3Fu)
+        if (argc < 2u || !app_parse_u16(argv[1], &v) || v > 0x3Fu)
         {
             dbg_write("ERR mode 0-63\r\n");
             return;
@@ -154,7 +113,7 @@ static void cmd_exec(char *line)
     }
     else if (strcmp(argv[0], "relay") == 0)
     {
-        if (argc < 3u || !parse_u16(argv[1], &v) || !parse_u16(argv[2], &w) ||
+        if (argc < 3u || !app_parse_u16(argv[1], &v) || !app_parse_u16(argv[2], &w) ||
             v < 1u || v > APP_RELAY_COUNT || w > 1u)
         {
             dbg_write("ERR relay <ch 1-6> <0|1>\r\n");
@@ -165,7 +124,7 @@ static void cmd_exec(char *line)
     }
     else if (strcmp(argv[0], "toggle") == 0)
     {
-        if (argc < 2u || !parse_u16(argv[1], &v) || v < 1u || v > APP_RELAY_COUNT)
+        if (argc < 2u || !app_parse_u16(argv[1], &v) || v < 1u || v > APP_RELAY_COUNT)
         {
             dbg_write("ERR toggle <ch 1-6>\r\n");
             return;
@@ -175,7 +134,7 @@ static void cmd_exec(char *line)
     }
     else if (strcmp(argv[0], "dim") == 0)
     {
-        if (argc < 3u || !parse_u16(argv[1], &v) || !parse_u16(argv[2], &w) ||
+        if (argc < 3u || !app_parse_u16(argv[1], &v) || !app_parse_u16(argv[2], &w) ||
             v < 1u || v > APP_DIM_COUNT || w > 100u)
         {
             dbg_write("ERR dim <ch 1-2> <0-100>\r\n");
@@ -186,7 +145,7 @@ static void cmd_exec(char *line)
     }
     else if (strcmp(argv[0], "th") == 0)
     {
-        if (argc < 2u || !parse_u16(argv[1], &v))
+        if (argc < 2u || !app_parse_u16(argv[1], &v))
         {
             dbg_write("ERR th <10-1000>\r\n");
             return;
@@ -196,13 +155,67 @@ static void cmd_exec(char *line)
     }
     else if (strcmp(argv[0], "ui") == 0)
     {
-        if (argc < 2u || !parse_u16(argv[1], &v) || v > 1u)
+        if (argc < 2u || !app_parse_u16(argv[1], &v) || v > 1u)
         {
             dbg_write("ERR ui <0|1>\r\n");
             return;
         }
         app_ui_enable((uint8_t)v);
         dbg_printf("OK ui=%u\r\n", (unsigned int)v);
+    }
+    else if (strcmp(argv[0], "blink") == 0)
+    {
+        if (argc < 2u || !app_parse_u16(argv[1], &v) || v > APP_RELAY_COUNT)
+        {
+            dbg_write("ERR blink <ch 0-6>\r\n");
+            return;
+        }
+        s_blink_ch = (uint8_t)v;
+        s_blink_tick = HAL_GetTick();
+        if (s_blink_ch == 0u)
+        {
+            dbg_write("OK blink off\r\n");
+        }
+        else
+        {
+            dbg_printf("OK blink CH%u at 1 Hz (blink 0 to stop)\r\n", (unsigned)s_blink_ch);
+        }
+    }
+    else if (strcmp(argv[0], "wifi") == 0)
+    {
+        if (argc < 3u)
+        {
+            dbg_write("ERR wifi <ssid> <pwd>\r\n");
+            return;
+        }
+        if (!app_net_start(argv[1], argv[2]))
+        {
+            dbg_write("ERR empty or too long ssid/pwd\r\n");
+            return;
+        }
+        dbg_write("OK connecting...\r\n");
+    }
+    else if (strcmp(argv[0], "net") == 0)
+    {
+        if (argc < 2u)
+        {
+            dbg_write("ERR net <stop|status> (start with: wifi <ssid> <pwd>)\r\n");
+            return;
+        }
+        if (strcmp(argv[1], "stop") == 0)
+        {
+            app_net_stop();
+            dbg_write("OK net stopped\r\n");
+        }
+        else if (strcmp(argv[1], "status") == 0)
+        {
+            dbg_printf("NET=%s IP=%s\r\n", app_net_state_name(app_net_state()),
+                       app_net_ip());
+        }
+        else
+        {
+            dbg_write("ERR net <stop|status> (start with: wifi <ssid> <pwd>)\r\n");
+        }
     }
     else
     {
@@ -215,11 +228,24 @@ void app_cmd_init(void)
     s_head = 0u;
     s_tail = 0u;
     s_line_len = 0u;
+    s_blink_ch = 0u;
+    s_blink_tick = HAL_GetTick();
     (void)HAL_UART_Receive_IT(&huart1, &s_rx_byte, 1u);
 }
 
 void app_cmd_task(void)
 {
+    if (s_blink_ch != 0u)
+    {
+        uint32_t now = HAL_GetTick();
+
+        if ((now - s_blink_tick) >= 500u)
+        {
+            s_blink_tick = now;
+            app_relay_toggle(s_blink_ch);
+        }
+    }
+
     while (s_tail != s_head)
     {
         char c = (char)s_rx[s_tail];
@@ -266,7 +292,7 @@ void app_cmd_task(void)
     }
 }
 
-/* USART1 单字节接收完成：入环形缓冲并重新武装 */
+/* USART1 单字节接收完成：入环形缓冲并重新武装；USART3 交给 app_net */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 {
     if (huart->Instance == USART1)
@@ -281,6 +307,10 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
 
         (void)HAL_UART_Receive_IT(&huart1, &s_rx_byte, 1u);
     }
+    else
+    {
+        app_net_rx_complete();
+    }
 }
 
 /* 溢出/噪声错误后重新武装接收，避免串口再也收不到数据 */
@@ -290,5 +320,9 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     {
         __HAL_UART_CLEAR_OREFLAG(huart);
         (void)HAL_UART_Receive_IT(&huart1, &s_rx_byte, 1u);
+    }
+    else
+    {
+        app_net_rx_error(huart);
     }
 }

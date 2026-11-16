@@ -30,6 +30,7 @@
 #include "app_dbg.h"
 #include "app_dim.h"
 #include "app_dust.h"
+#include "app_net.h"
 #include "app_relay.h"
 #include "app_ui.h"
 /* USER CODE END Includes */
@@ -118,6 +119,7 @@ int main(void)
   app_dust_init();
   app_alarm_init();                           /* 蜂鸣器/状态灯静音 */
   app_cmd_init();                             /* USART1 命令接收就绪 */
+  app_net_init();                             /* USART3 + ESP8266 */
   app_ui_init();
 
   dbg_write("\r\nF407_esp8266 ready. type 'help' for commands.\r\n");
@@ -132,12 +134,13 @@ int main(void)
   {
     uint32_t now = HAL_GetTick();
 
-    if ((now - tick_10ms) >= 10u)             /* 10 ms 时基：命令、采样、报警 */
+    if ((now - tick_10ms) >= 10u)             /* 10 ms 时基：命令、采样、报警、联网 */
     {
       tick_10ms = now;
       app_cmd_task();
       app_dust_task();
       app_alarm_task(app_dust_level());
+      app_net_task();
     }
 
     if ((now - tick_1s) >= 1000u)             /* 1 s 时基：状态输出 */

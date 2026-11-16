@@ -11,6 +11,7 @@
 #include "app_dbg.h"
 #include "app_dim.h"
 #include "app_dust.h"
+#include "app_net.h"
 #include "app_relay.h"
 #include "main.h"
 
@@ -43,7 +44,7 @@ void app_ui_print_status(void)
     }
     bits[APP_RELAY_COUNT] = '\0';
 
-    dbg_printf("%6lus  PM=%3u ug/m3  TH=%3u  LV=%-6s  RELAY=0x%02X [%s]  DIM=%3u%%/%3u%%\r\n",
+    dbg_printf("%5lus PM=%3u TH=%3u %-6s RELAY=0x%02X [%s] DIM=%3u%%/%3u%% NET=%s %s\r\n",
                (unsigned long)(HAL_GetTick() / 1000u),
                (unsigned int)app_dust_pm(),
                (unsigned int)app_dust_threshold(),
@@ -51,7 +52,9 @@ void app_ui_print_status(void)
                (unsigned int)mode,
                bits,
                (unsigned int)app_dim_get(1u),
-               (unsigned int)app_dim_get(2u));
+               (unsigned int)app_dim_get(2u),
+               app_net_state_name(app_net_state()),
+               app_net_ip());
 }
 
 void app_ui_task(void)

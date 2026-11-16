@@ -8,13 +8,13 @@
 
 #include "app_dust.h"
 #include "adc.h"
+#include "app_dbg.h"
 #include "main.h"
 
 #define DUST_WIN_LEN       9u        /* 中位数窗口，抑制气流毛刺 */
 #define DUST_ALARM_COUNT   3u        /* 连续 3 次超阈值才进 ALARM */
 #define DUST_RELEASE_MS    30000u    /* 低于解除线持续 30 s 才解除 */
 #define DUST_RELEASE_PCT   80u       /* 解除线 = 阈值的 80% */
-#define DUST_ADC_STAB_LOOPS 2000u    /* 上电稳定等待（约 3 us @168 MHz） */
 
 /* 本工程的裁剪版 CMSIS 头里没有 ADC_CR2_CAL，按 RM0090 补上（bit17） */
 #define DUST_ADC_CR2_CAL (0x1UL << 17)
@@ -157,22 +157,30 @@ void app_dust_init(void)
     s_last_tick = HAL_GetTick();
 }
 
+/* ADC 自校准。本工程 HAL 版本没有 HAL_ADCEx_Calibration_Start()，
+   这里按 RM0090 手动置位 CAL；超时就放弃（用出厂校准），绝不阻塞启动 */
 void app_dust_calibrate(void)
 {
-    volatile uint32_t d;
+    uint32_t start;
 
-    /* 校准要求 ADON = 1：HAL_ADC_Init() 不打开 ADC，这里先使能并等稳定 */
+    /* 校准要求 ADON = 1 且已稳定：HAL_ADC_Init() 不打开 ADC，这里先使能 */
     if ((hadc1.Instance->CR2 & ADC_CR2_ADON) == 0u)
     {
         __HAL_ADC_ENABLE(&hadc1);
-        for (d = 0u; d < DUST_ADC_STAB_LOOPS; d++)
-        {
-        }
     }
+    HAL_Delay(1u);                     /* tSTAB */
 
     hadc1.Instance->CR2 |= DUST_ADC_CR2_CAL;
-    while ((hadc1.Instance->CR2 & DUST_ADC_CR2_CAL) != 0u)   /* 校准完成由硬件清零 */
+    start = HAL_GetTick();
+
+    while ((hadc1.Instance->CR2 & DUST_ADC_CR2_CAL) != 0u)
     {
+        if ((HAL_GetTick() - start) > 20u)
+        {
+            hadc1.Instance->CR2 &= ~DUST_ADC_CR2_CAL;
+            dbg_write("adc: calibration timeout, using factory trim\r\n");
+            break;
+        }
     }
 }
 
