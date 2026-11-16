@@ -56,6 +56,8 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     Core/Src/delay.c
     Core/Src/lcd.c
     Core/Src/app_lcd.c
+    Core/Src/app_touch.c
+    Core/Src/app_cfg.c
     Core/Src/app_util.c
 )
 

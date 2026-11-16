@@ -30,9 +30,11 @@
 #include "app_dbg.h"
 #include "app_dim.h"
 #include "app_dust.h"
+#include "app_cfg.h"
 #include "app_lcd.h"
 #include "app_net.h"
 #include "app_relay.h"
+#include "app_touch.h"
 #include "app_ui.h"
 /* USER CODE END Includes */
 
@@ -67,6 +69,25 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 
 /* USER CODE END 0 */
+
+/* 触摸点击：点继电器方块 = 翻转该路，点 ALL OFF = 全断 */
+static void on_touch_click(uint16_t x, uint16_t y)
+{
+  uint8_t hit = app_lcd_hit_test(x, y);
+
+  if (hit >= 1u && hit <= APP_RELAY_COUNT)
+  {
+    app_relay_toggle(hit);
+    dbg_printf("touch: CH%u -> %s (mode=0x%02X)\r\n", (unsigned)hit,
+               ((app_relay_mode() >> (hit - 1u)) & 1u) ? "ON" : "OFF",
+               (unsigned)app_relay_mode());
+  }
+  else if (hit == APP_LCD_BTN_ALL_OFF)
+  {
+    app_relay_set_mode(0u);
+    dbg_write("touch: ALL OFF\r\n");
+  }
+}
 
 /**
   * @brief  The application entry point.
@@ -123,6 +144,7 @@ int main(void)
   app_net_init();                             /* USART3 + ESP8266 */
   app_ui_init();
   app_lcd_init();                             /* 3.5 寸 TFTLCD（无屏时会自己报错跳过） */
+  app_touch_init();                           /* XPT2046 电阻触摸（已存校准就直接用） */
 
   dbg_write("\r\nF407_esp8266 ready. type 'help' for commands.\r\n");
   /* USER CODE END 2 */
@@ -143,6 +165,7 @@ int main(void)
       app_dust_task();
       app_alarm_task(app_dust_level());
       app_net_task();
+      app_touch_task(on_touch_click);
     }
 
     if ((now - tick_1s) >= 1000u)             /* 1 s 时基：状态输出 */

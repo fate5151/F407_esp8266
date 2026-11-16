@@ -16,7 +16,8 @@ CubeMX 生成的 CMake 工程，HAL 库 + arm-none-eabi-gcc，VS Code + Cortex-D
 | 采样点 | TIM3_CH2 | PA7 | 280 µs 处，TRGO = OC2REF |
 | 调试串口 | USART1 | PA9 / PA10 | 115200 8N1 |
 | WiFi 模块 | USART3 | PB10 / PB11 | 115200 8N1（ATK-MW8266D 插座） |
-| 板载 LED | GPIO | PF9 / PF10 | 低电平亮 |
+| 板载 LED | GPIO | PF9 / PF10 | 低电平亮（DS0 心跳 / DS1 网络就绪） |
+| **3.5" TFTLCD** | FSMC NE4 | PD/PE/PF12/PG12 + PB15 背光 | NT35310，480×320，界面见 T7 |
 
 ## 代码结构
 
@@ -26,6 +27,9 @@ Core/Src/app_dim.c     TIM8 两路调光 0~100%
 Core/Src/app_dust.c    ADC 采样 → 9 点中位数 → PM 换算 → 回差报警状态机
 Core/Src/app_alarm.c   蜂鸣器 + 状态灯报警指示，ALARM 时自动开排风 CH2
 Core/Src/app_net.c     ESP8266（USART3）AT 联网 + HTTP 服务器，浏览器远程控制
+Core/Src/app_lcd.c     3.5 寸 TFTLCD 显示（FSMC NE4，NT35310，480x320）
+Core/Src/lcd.c         正点原子 TFTLCD 驱动 + font.h 字库
+Core/Src/delay.c       DWT us 延时 / HAL_Delay ms
 Core/Src/app_ui.c      状态显示（暂无屏，先用 USART1 输出一行）
 Core/Src/app_cmd.c     USART1 行命令（中断接收 + 环形缓冲）
 Core/Src/app_dbg.c     调试串口输出 / printf 重定向
@@ -93,7 +97,8 @@ wifi MyHome_2.4G 12345678
 ## 进度
 
 - ✅ 外设配置、CMake 工程、业务代码骨架（编译零告警）
+- ✅ T7 显示：3.5 寸 TFTLCD（NT35310 / 480×320 / FSMC NE4），屏上显示 6 路状态 + PM + 阈值 + 网络
 - ✅ 远程控制：ESP8266 AT 联网 + HTTP 页面控制 6 路继电器 / 调光 / 阈值（T8/T9）
-- ⏳ T1~T10 上板实测（逐项验证流程见 [开发指南.md](开发指南.md)）
+- ⏳ T1~T6、T8~T10 上板实测（逐项验证流程见 [开发指南.md](开发指南.md)）
 
 详细的引脚表、验证步骤、常见坑都在 [开发指南.md](开发指南.md)。

@@ -22,6 +22,14 @@ void app_lcd_update(void);
 
 uint8_t app_lcd_ok(void);
 
+/* 点击命中测试：1~6 = 对应继电器方块，APP_LCD_BTN_ALL_OFF = 全断按钮，0 = 空白 */
+#define APP_LCD_BTN_ALL_OFF 0xFEu
+uint8_t app_lcd_hit_test(uint16_t x, uint16_t y);
+
+uint16_t app_lcd_width(void);
+uint16_t app_lcd_height(void);
+uint16_t app_lcd_id(void);
+
 #ifdef __cplusplus
 }
 #endif

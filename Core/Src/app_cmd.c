@@ -15,11 +15,14 @@
   */
 
 #include "app_cmd.h"
+#include "app_cfg.h"
 #include "app_dbg.h"
 #include "app_dim.h"
 #include "app_dust.h"
+#include "app_lcd.h"
 #include "app_net.h"
 #include "app_relay.h"
+#include "app_touch.h"
 #include "app_ui.h"
 #include "app_util.h"
 #include "usart.h"
@@ -54,9 +57,11 @@ static void cmd_help(void)
               "  th <ug/m3>            dust alarm threshold (10-1000)\r\n"
               "  ui <0|1>              1 Hz status line on/off\r\n"
               "  blink <ch>            toggle one relay at 1 Hz (0 = stop)\r\n"
-              "  wifi <ssid> <pwd>     join AP, start HTTP server on port 80\r\n"
+              "  wifi <ssid> <pwd>     join AP, start HTTP server (saved to flash)\r\n"
               "                        (put SSID in \"quotes\" if it has spaces)\r\n"
               "  net <stop|status>     stop network / show state and IP\r\n"
+              "  forget                erase saved wifi from flash\r\n"
+              "  touch <cal|raw|scan|info>  calibrate / dump raw / scan I2C / state\r\n"
               "  at <AT+...>           send raw AT to ESP8266 (debug)\r\n");
 }
 
@@ -206,6 +211,47 @@ static void cmd_exec(char *line)
         else
         {
             dbg_printf("OK blink CH%u at 1 Hz (blink 0 to stop)\r\n", (unsigned)s_blink_ch);
+        }
+    }
+    else if (strcmp(argv[0], "forget") == 0)
+    {
+        app_cfg_erase_wifi();
+        dbg_write("OK saved wifi erased\r\n");
+    }
+    else if (strcmp(argv[0], "touch") == 0)
+    {
+        if (argc < 2u)
+        {
+            dbg_write("ERR touch <cal|raw|info>\r\n");
+            return;
+        }
+        if (strcmp(argv[1], "cal") == 0)
+        {
+            dbg_write("OK tap the 4 crosses...\r\n");
+            app_touch_calibrate();
+        }
+        else if (strcmp(argv[1], "raw") == 0)
+        {
+            app_touch_report();
+        }
+        else if (strcmp(argv[1], "scan") == 0)
+        {
+            app_touch_scan();
+        }
+        else if (strcmp(argv[1], "poll") == 0)
+        {
+            app_touch_poll(10u);
+        }
+        else if (strcmp(argv[1], "info") == 0)
+        {
+            dbg_printf("TOUCH cal=%u lcd=%ux%u id=0x%04X\r\n",
+                       (unsigned)app_touch_calibrated(),
+                       (unsigned)app_lcd_width(), (unsigned)app_lcd_height(),
+                       (unsigned)app_lcd_id());
+        }
+        else
+        {
+            dbg_write("ERR touch <cal|raw|info>\r\n");
         }
     }
     else if (strcmp(argv[0], "wifi") == 0)

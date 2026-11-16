@@ -18,6 +18,7 @@
   */
 
 #include "app_net.h"
+#include "app_cfg.h"
 #include "app_dbg.h"
 #include "app_dim.h"
 #include "app_dust.h"
@@ -815,9 +816,24 @@ void app_net_init(void)
 
     (void)HAL_UART_Receive_IT(&huart3, &s_rx_byte, 1u);
 
-    if (strlen(APP_NET_SSID_DEFAULT) > 0u)
+    /* 优先用 Flash 里保存的账号（掉电不丢），没有再用编译期默认值 */
     {
-        (void)app_net_start(APP_NET_SSID_DEFAULT, APP_NET_PWD_DEFAULT);
+        char ssid[APP_CFG_SSID_LEN];
+        char pwd[APP_CFG_PWD_LEN];
+
+        if (app_cfg_load_wifi(ssid, pwd))
+        {
+            dbg_printf("net: stored wifi '%s', auto connect\r\n", ssid);
+            (void)app_net_start(ssid, pwd);
+        }
+        else if (strlen(APP_NET_SSID_DEFAULT) > 0u)
+        {
+            (void)app_net_start(APP_NET_SSID_DEFAULT, APP_NET_PWD_DEFAULT);
+        }
+        else
+        {
+            dbg_write("net: no stored wifi, send 'wifi <ssid> <pwd>'\r\n");
+        }
     }
 }
 
@@ -840,6 +856,20 @@ uint8_t app_net_start(const char *ssid, const char *pwd)
 
     memcpy(s_ssid, ssid, sl + 1u);
     memcpy(s_pwd, pwd, pl + 1u);
+
+    /* 存到 Flash，下次上电自动连（内容没变时不会重复擦写） */
+    {
+        uint8_t r = app_cfg_save_wifi(ssid, pwd);
+
+        if (r == 1u)
+        {
+            dbg_write("net: wifi saved to flash\r\n");
+        }
+        else if (r == 0u)
+        {
+            dbg_write("net: wifi save failed (session only)\r\n");
+        }
+    }
 
     s_started = 1u;
     s_ip[0] = '\0';
