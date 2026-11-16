@@ -20,6 +20,10 @@ extern "C" {
    避免低电平触发模块在复位瞬间 6 路全吸合 */
 void app_relay_preinit(void);
 
+/* 按保存的极性返回"断开"对应的引脚电平（GPIO_PIN_SET / GPIO_PIN_RESET），
+   给 gpio.c 作上电初值用，避免输出使能瞬间误吸合 */
+uint32_t app_relay_off_level(void);
+
 /* 上电全部断开（mode = 0） */
 void app_relay_init(void);
 

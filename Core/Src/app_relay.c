@@ -95,6 +95,12 @@ void app_relay_preinit(void)
     app_relay_refresh();
 }
 
+uint32_t app_relay_off_level(void)
+{
+    /* 低电平触发：断开 = 高电平 */
+    return (relay_cfg_load() != 0u) ? (uint32_t)GPIO_PIN_SET : (uint32_t)GPIO_PIN_RESET;
+}
+
 void app_relay_set_polarity(uint8_t active_low)
 {
     uint8_t v = (active_low != 0u) ? 1u : 0u;
