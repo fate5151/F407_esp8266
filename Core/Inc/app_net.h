@@ -37,6 +37,7 @@ typedef enum
     APP_NET_RUN,             /* 正常服务中 */
     APP_NET_SEND_PROMPT,     /* 等 '>' 提示符 */
     APP_NET_SEND_DATA,       /* 数据已发出，等 SEND OK */
+    APP_NET_CLOSING,         /* 等 AT+CIPCLOSE 的 OK，避免新连接撞上 */
     APP_NET_FAILED           /* 出错，10 s 后重来 */
 } app_net_state_t;
 

@@ -34,7 +34,9 @@
 #define TP_CMD_Y    0x90u      /* 读 Y+，12 bit */
 
 #define TOUCH_SAMPLES   5u
-#define TOUCH_DEBOUNCE  2u     /* 连续 2 次(20 ms)才算按下 */
+#define TOUCH_DEBOUNCE  3u     /* 连续 3 次(30 ms)才算按下/松开 */
+#define TOUCH_MIN_PRESS 40u    /* 按下至少 40 ms 才认，排除抖动 */
+#define TOUCH_COOLDOWN  300u   /* 一次点击后 300 ms 内忽略新手势 */
 
 /* ------------------------------------------------------------ 校准数据 */
 
@@ -61,9 +63,12 @@ static uint16_t s_rawx;
 static uint16_t s_rawy;
 
 static uint8_t s_press_cnt;
+static uint8_t s_release_cnt;
 static uint8_t s_down;
 static uint16_t s_down_x;
 static uint16_t s_down_y;
+static uint32_t s_down_tick;
+static uint32_t s_cooldown_until;
 
 /* ------------------------------------------------------------ 软件 SPI */
 
@@ -497,18 +502,29 @@ uint8_t app_touch_init(void)
     }
 
     s_press_cnt = 0u;
+    s_release_cnt = 0u;
     s_down = 0u;
+    s_cooldown_until = 0u;
     return s_cal_valid;
 }
 
 void app_touch_task(app_touch_cb_t on_click)
 {
-    uint16_t x = 0u;
-    uint16_t y = 0u;
-    uint8_t got;
+    uint32_t now = HAL_GetTick();
+
+    /* 刚处理完一次点击，忽略这段时间内的抖动 */
+    if ((int32_t)(now - s_cooldown_until) < 0)
+    {
+        s_down = 0u;
+        s_press_cnt = 0u;
+        s_release_cnt = 0u;
+        return;
+    }
 
     if (T_PEN_DOWN())
     {
+        s_release_cnt = 0u;
+
         if (s_press_cnt < TOUCH_DEBOUNCE)
         {
             s_press_cnt++;
@@ -516,6 +532,7 @@ void app_touch_task(app_touch_cb_t on_click)
         else if (!s_down)
         {
             s_down = 1u;
+            s_down_tick = now;
             (void)app_touch_read(&s_down_x, &s_down_y);   /* 按下时采样才算数 */
         }
     }
@@ -523,18 +540,31 @@ void app_touch_task(app_touch_cb_t on_click)
     {
         if (s_down)
         {
-            x = s_down_x;
-            y = s_down_y;
-            got = (uint8_t)((x != 0u || y != 0u) ? 1u : 0u);
-
-            if (got && on_click != NULL && s_cal_valid)
+            /* 松开同样要连续采样确认，避免按住期间的毛刺被当成松开 */
+            if (s_release_cnt < TOUCH_DEBOUNCE)
             {
-                on_click(x, y);
+                s_release_cnt++;
+            }
+            else
+            {
+                if ((now - s_down_tick) >= TOUCH_MIN_PRESS &&
+                    (s_down_x != 0u || s_down_y != 0u) &&
+                    on_click != NULL && s_cal_valid)
+                {
+                    on_click(s_down_x, s_down_y);
+                    s_cooldown_until = now + TOUCH_COOLDOWN;
+                }
+
+                s_down = 0u;
+                s_press_cnt = 0u;
+                s_release_cnt = 0u;
             }
         }
-
-        s_down = 0u;
-        s_press_cnt = 0u;
+        else
+        {
+            s_press_cnt = 0u;
+            s_release_cnt = 0u;
+        }
     }
 }
 

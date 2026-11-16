@@ -282,6 +282,16 @@ static void net_send_close(void)
     net_send(s_cmd);
 }
 
+/* 发 CIPCLOSE 并等它的 OK 再回 RUN，否则新连接会撞上未释放的 link */
+static void net_begin_close(void)
+{
+    s_mark = s_stream_len;          /* 保护已到达的下一帧数据 */
+    net_send_close();
+    s_deadline = HAL_GetTick() + 600u;
+    s_waiting = 1u;
+    s_state = APP_NET_CLOSING;
+}
+
 /* ------------------------------------------------------------ HTTP 页面 */
 
 static uint8_t query_get(const char *query, const char *key, uint16_t *out)
@@ -321,47 +331,94 @@ static void tx_http_redirect(void)
            "Cache-Control: no-store\r\nConnection: close\r\n\r\n");
 }
 
+/* ---- 页面 body 单独构建，之后按实际长度写 Content-Length ---- */
+static char     s_body[NET_TX_MAX - 256u];
+static uint16_t s_body_len;
+
+static void body_reset(void)
+{
+    s_body_len = 0u;
+    s_body[0] = '\0';
+}
+
+static void body_add(const char *fmt, ...)
+{
+    va_list ap;
+    int w;
+
+    if (s_body_len >= (uint16_t)(sizeof(s_body) - 1u))
+    {
+        return;
+    }
+
+    va_start(ap, fmt);
+    w = vsnprintf(&s_body[s_body_len], sizeof(s_body) - s_body_len, fmt, ap);
+    va_end(ap);
+
+    if (w > 0)
+    {
+        s_body_len = (uint16_t)(s_body_len + (uint16_t)w);
+        if (s_body_len >= (uint16_t)sizeof(s_body))
+        {
+            s_body_len = (uint16_t)(sizeof(s_body) - 1u);
+        }
+    }
+}
+
 static void page_build(void)
 {
     uint8_t mode = app_relay_mode();
     app_dust_level_t lv = app_dust_level();
     uint8_t i;
 
-    tx_add("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
-           "Cache-Control: no-store\r\nConnection: close\r\n\r\n");
-    tx_add("<!DOCTYPE html><html><head><meta charset=utf-8>"
-           "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
-           "<meta http-equiv=refresh content=3><title>F407</title>"
-           "<style>body{font-family:sans-serif;margin:16px}"
+    body_reset();
+    body_add("<!DOCTYPE html><html><head><meta charset=utf-8>"
+             "<meta name=viewport content=\"width=device-width,initial-scale=1\">"
+             "<meta http-equiv=refresh content=3><title>F407</title>"
+             "<style>body{font-family:sans-serif;margin:16px}"
            "table{border-collapse:collapse}td,th{padding:6px 12px;border:1px solid #ccc}"
            "a{text-decoration:none}.on{background:#e33;color:#fff}.off{background:#eee}"
            ".hi{color:#e33;font-weight:bold}</style></head><body>");
-    tx_add("<h3>F407 Remote</h3><p>PM <b>%u</b> ug/m3 &nbsp; TH %u &nbsp; "
+    body_add("<h3>F407 Remote</h3><p>PM <b>%u</b> ug/m3 &nbsp; TH %u &nbsp; "
            "<span class=%s>%s</span></p>",
            (unsigned)app_dust_pm(), (unsigned)app_dust_threshold(),
            (lv == APP_DUST_LEVEL_NORMAL) ? "off" : "hi",
            app_dust_level_name(lv));
-    tx_add("<table><tr><th>CH</th><th>State</th><th>Action</th></tr>");
+    body_add("<table><tr><th>CH</th><th>State</th><th>Action</th></tr>");
 
     for (i = 0u; i < APP_RELAY_COUNT; i++)
     {
         uint8_t on = (uint8_t)((mode >> i) & 1u);
 
-        tx_add("<tr><td>%u</td><td class=%s>%s</td><td><a href=\"/toggle?ch=%u\">%s</a></td></tr>",
+        body_add("<tr><td>%u</td><td class=%s>%s</td><td><a href=\"/toggle?ch=%u\">%s</a></td></tr>",
                (unsigned)(i + 1u), on ? "on" : "off", on ? "ON" : "OFF",
                (unsigned)(i + 1u), on ? "OFF" : "ON");
     }
 
-    tx_add("</table><p>DIM1: ");
-    tx_add("<a href=\"/dim?ch=1&v=0\">0%%</a> <a href=\"/dim?ch=1&v=50\">50%%</a> "
+    body_add("</table><p>DIM1: ");
+    body_add("<a href=\"/dim?ch=1&v=0\">0%%</a> <a href=\"/dim?ch=1&v=50\">50%%</a> "
            "<a href=\"/dim?ch=1&v=100\">100%%</a> (%u%%)", (unsigned)app_dim_get(1u));
-    tx_add("<br>DIM2: ");
-    tx_add("<a href=\"/dim?ch=2&v=0\">0%%</a> <a href=\"/dim?ch=2&v=50\">50%%</a> "
+    body_add("<br>DIM2: ");
+    body_add("<a href=\"/dim?ch=2&v=0\">0%%</a> <a href=\"/dim?ch=2&v=50\">50%%</a> "
            "<a href=\"/dim?ch=2&v=100\">100%%</a> (%u%%)", (unsigned)app_dim_get(2u));
-    tx_add("<p>TH: <a href=\"/th?v=100\">100</a> <a href=\"/th?v=150\">150</a> "
+    body_add("<p>TH: <a href=\"/th?v=100\">100</a> <a href=\"/th?v=150\">150</a> "
            "<a href=\"/th?v=200\">200</a>");
-    tx_add("<p><a href=\"/all?m=0\">ALL OFF</a> &nbsp; <a href=\"/all?m=63\">ALL ON</a>");
-    tx_add("</body></html>");
+    body_add("<p><a href=\"/all?m=0\">ALL OFF</a> &nbsp; <a href=\"/all?m=63\">ALL ON</a>");
+    body_add("</body></html>");
+
+    /* 头部 + body 拼成完整响应；带 Content-Length 客户端读完即可结束，
+       不必等连接关闭（之前没长度，超时就表现为 HTTP 000） */
+    tx_reset();
+    tx_add("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+           "Content-Length: %u\r\nCache-Control: no-store\r\n"
+           "Connection: close\r\n\r\n", (unsigned)s_body_len);
+
+    if (((uint32_t)s_tx_len + (uint32_t)s_body_len) < NET_TX_MAX)
+    {
+        memcpy(&s_tx[s_tx_len], s_body, s_body_len);
+        s_tx_len = (uint16_t)(s_tx_len + s_body_len);
+        s_tx[s_tx_len] = '\0';
+    }
 }
 
 /* 处理一条 HTTP 请求，结果写进 s_tx */
@@ -489,9 +546,16 @@ static void net_parse_ipd(void)
         p = strstr(s_stream, "+IPD,");
         if (p == NULL)
         {
-            if (net_has(",CONNECT"))
+            if (net_has(",CLOSED") || net_has(",CONNECT"))
             {
-                dbg_write("net: client connect\r\n");
+                if (net_has(",CONNECT"))
+                {
+                    dbg_write("net: client connect\r\n");
+                }
+                else
+                {
+                    dbg_write("net: client closed\r\n");
+                }
                 stream_clear();
                 return;
             }
@@ -729,7 +793,20 @@ void app_net_task(void)
         break;
 
     case APP_NET_RUN:
-        net_parse_ipd();
+        if (net_has("WIFI DISCONNECT") || net_has("WIFI GOT IP"))
+        {
+            /* 热点断开（或重新拿到 IP）时重新走一遍连接流程 */
+            if (net_has("WIFI DISCONNECT"))
+            {
+                dbg_write("net: wifi lost, reconnect in 10 s\r\n");
+            }
+            stream_clear();
+            net_enter(APP_NET_FAILED);
+        }
+        else
+        {
+            net_parse_ipd();
+        }
         break;
 
     case APP_NET_SEND_PROMPT:
@@ -762,25 +839,30 @@ void app_net_task(void)
         if (ok != NET_NOT_FOUND)
         {
             net_drop_response(s_mark, ok, 7u);
-            net_send_close();
-            net_enter(APP_NET_RUN);
+            net_begin_close();       /* 关掉 link，等 OK 再收下一个连接 */
         }
         else if (fail != NET_NOT_FOUND)
         {
             net_drop_response(s_mark, fail, 9u);
             dbg_write("send: SEND FAIL\r\n");
-            net_send_close();
-            net_enter(APP_NET_RUN);
+            net_begin_close();
         }
         else if (net_timeout())
         {
             dbg_printf("send: no SEND OK, module said [%s]\r\n", s_stream + s_mark);
             net_drop_response(s_mark, NET_NOT_FOUND, 0u);
-            net_send_close();
-            net_enter(APP_NET_RUN);
+            net_begin_close();
         }
         break;
     }
+
+    case APP_NET_CLOSING:
+        if (net_has("OK\r\n") || net_has("ERROR") || net_has("link is not valid") ||
+            net_timeout())
+        {
+            net_enter(APP_NET_RUN);
+        }
+        break;
 
     case APP_NET_FAILED:
         if (!s_waiting)
@@ -790,7 +872,9 @@ void app_net_task(void)
         }
         else if (net_timeout())
         {
-            net_enter(APP_NET_WAIT_MODULE);
+            dbg_write("net: retry wifi\r\n");
+            net_enter(APP_NET_CLEAN);
+            s_started = 1u;
         }
         break;
 
@@ -917,6 +1001,7 @@ const char *app_net_state_name(app_net_state_t st)
         return "READY";
     case APP_NET_SEND_PROMPT:
     case APP_NET_SEND_DATA:
+    case APP_NET_CLOSING:
         return "SENDING";
     case APP_NET_FAILED:
         return "FAILED";
