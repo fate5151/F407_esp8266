@@ -1,0 +1,31 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "DAPLink: Launch (pyOCD)",
+            "type": "cortex-debug",
+            "request": "launch",
+            "servertype": "pyocd",
+            "serverpath": "C:/Users/Lenovo/AppData/Roaming/Python/Python313/Scripts/pyocd.exe",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/F407_esp8266.elf",
+            "targetId": "stm32f407vgtx",
+            "armToolchainPath": "C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/14.2 rel1/bin",
+            "runToEntryPoint": "main",
+            "preLaunchTask": "Build",
+            "showDevDebugOutput": "none"
+        },
+        {
+            "name": "DAPLink: Attach (pyOCD)",
+            "type": "cortex-debug",
+            "request": "attach",
+            "servertype": "pyocd",
+            "serverpath": "C:/Users/Lenovo/AppData/Roaming/Python/Python313/Scripts/pyocd.exe",
+            "cwd": "${workspaceFolder}",
+            "executable": "${workspaceFolder}/build/Debug/F407_esp8266.elf",
+            "targetId": "stm32f407vgtx",
+            "armToolchainPath": "C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/14.2 rel1/bin",
+            "showDevDebugOutput": "none"
+        }
+    ]
+}

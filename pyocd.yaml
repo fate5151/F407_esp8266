@@ -1,0 +1,6 @@
+# pyOCD 配置：Cortex-Debug 1.12.1 只认 "GDB server started on port"，所以锁 pyOCD 0.39.0
+# 中文 Windows 下 pyOCD 0.39 有 GBK 解码问题，需用户环境变量 PYTHONUTF8=1（改完要完全重启 VS Code）
+target_override: stm32f407vgtx
+frequency: 1000000
+pack:
+  - C:/Users/Lenovo/AppData/Local/pyocd-packs/Keil.STM32F4xx_DFP.3.1.1.pack

@@ -1,0 +1,70 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Configure (Debug)",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--preset", "Debug"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": []
+        },
+        {
+            "label": "Build",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", "--preset", "Debug"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "problemMatcher": ["$gcc"]
+        },
+        {
+            "label": "Flash (DAPLink)",
+            "detail": "编译 + 烧录（Ctrl+Shift+B 默认构建任务）",
+            "type": "shell",
+            "command": "C:/Users/Lenovo/AppData/Roaming/Python/Python313/Scripts/pyocd.exe",
+            "args": ["flash", "${workspaceFolder}/build/Debug/F407_esp8266.elf"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": { "PYTHONUTF8": "1" }
+            },
+            "dependsOn": "Build",
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": []
+        },
+        {
+            "label": "Flash only (no build)",
+            "detail": "直接烧录现有 build/Debug/F407_esp8266.elf，不重新编译",
+            "type": "shell",
+            "command": "C:/Users/Lenovo/AppData/Roaming/Python/Python313/Scripts/pyocd.exe",
+            "args": ["flash", "${workspaceFolder}/build/Debug/F407_esp8266.elf"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": { "PYTHONUTF8": "1" }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Erase chip (DAPLink)",
+            "type": "shell",
+            "command": "C:/Users/Lenovo/AppData/Roaming/Python/Python313/Scripts/pyocd.exe",
+            "args": ["erase", "-c"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": { "PYTHONUTF8": "1" }
+            },
+            "problemMatcher": []
+        },
+        {
+            "label": "Reset target (DAPLink)",
+            "type": "shell",
+            "command": "C:/Users/Lenovo/AppData/Roaming/Python/Python313/Scripts/pyocd.exe",
+            "args": ["cmd", "-c", "reset"],
+            "options": {
+                "cwd": "${workspaceFolder}",
+                "env": { "PYTHONUTF8": "1" }
+            },
+            "problemMatcher": []
+        }
+    ]
+}
