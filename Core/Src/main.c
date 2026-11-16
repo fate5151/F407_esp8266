@@ -30,6 +30,7 @@
 #include "app_dbg.h"
 #include "app_dim.h"
 #include "app_dust.h"
+#include "app_lcd.h"
 #include "app_net.h"
 #include "app_relay.h"
 #include "app_ui.h"
@@ -121,6 +122,7 @@ int main(void)
   app_cmd_init();                             /* USART1 命令接收就绪 */
   app_net_init();                             /* USART3 + ESP8266 */
   app_ui_init();
+  app_lcd_init();                             /* 3.5 寸 TFTLCD（无屏时会自己报错跳过） */
 
   dbg_write("\r\nF407_esp8266 ready. type 'help' for commands.\r\n");
   /* USER CODE END 2 */
@@ -147,6 +149,7 @@ int main(void)
     {
       tick_1s = now;
       app_ui_task();
+      app_lcd_update();
     }
     /* USER CODE END WHILE */
 
