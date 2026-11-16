@@ -15,11 +15,45 @@
 #include "app_relay.h"
 #include "main.h"
 
+/* 板载 LED：DS0 = PF9，DS1 = PF10，这块板是低电平亮 */
+#define LED0_ON()  HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_RESET)
+#define LED0_OFF() HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_SET)
+#define LED1_ON()  HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_RESET)
+#define LED1_OFF() HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET)
+
 static uint8_t s_enabled = 1u;
+static uint8_t s_led0_on;
 
 void app_ui_init(void)
 {
     s_enabled = 1u;
+    s_led0_on = 0u;
+    LED0_OFF();
+    LED1_OFF();
+}
+
+/* DS0 每秒翻转（心跳，0.5 Hz），DS1 网络就绪常亮 */
+static void leds_update(void)
+{
+    s_led0_on = (uint8_t)(s_led0_on ^ 1u);
+
+    if (s_led0_on)
+    {
+        LED0_ON();
+    }
+    else
+    {
+        LED0_OFF();
+    }
+
+    if (app_net_running())
+    {
+        LED1_ON();
+    }
+    else
+    {
+        LED1_OFF();
+    }
 }
 
 void app_ui_enable(uint8_t on)
@@ -59,6 +93,8 @@ void app_ui_print_status(void)
 
 void app_ui_task(void)
 {
+    leds_update();
+
     if (s_enabled)
     {
         app_ui_print_status();
