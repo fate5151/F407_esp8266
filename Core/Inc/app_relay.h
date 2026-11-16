@@ -16,6 +16,10 @@ extern "C" {
 
 #define APP_RELAY_COUNT 6u
 
+/* 上电后立刻调用（MX_GPIO_Init 之后）：按保存的极性把引脚拉到"断开"电平，
+   避免低电平触发模块在复位瞬间 6 路全吸合 */
+void app_relay_preinit(void);
+
 /* 上电全部断开（mode = 0） */
 void app_relay_init(void);
 
@@ -30,6 +34,14 @@ void app_relay_toggle(uint8_t ch);
 
 /* 当前位掩码，bit0..bit5 = CH1..CH6 */
 uint8_t app_relay_mode(void);
+
+/* 触发极性：0 = 高电平吸合（默认），1 = 低电平吸合。
+   低电平模块在 mc 复位时引脚为低，会自动全吸合，需要靠这个开关纠正 */
+void app_relay_set_polarity(uint8_t active_low);
+uint8_t app_relay_polarity(void);
+
+/* 重新按当前极性刷新所有引脚（改完极性调一次） */
+void app_relay_refresh(void);
 
 #ifdef __cplusplus
 }

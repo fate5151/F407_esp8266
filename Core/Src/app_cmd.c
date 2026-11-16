@@ -57,6 +57,7 @@ static void cmd_help(void)
               "  th <ug/m3>            dust alarm threshold (10-1000)\r\n"
               "  ui <0|1>              1 Hz status line on/off\r\n"
               "  blink <ch>            toggle one relay at 1 Hz (0 = stop)\r\n"
+              "  relaypol <0|1>        0=high-trigger, 1=low-trigger module\r\n"
               "  wifi <ssid> <pwd>     join AP, start HTTP server (saved to flash)\r\n"
               "                        (put SSID in \"quotes\" if it has spaces)\r\n"
               "  net <stop|status>     stop network / show state and IP\r\n"
@@ -212,6 +213,16 @@ static void cmd_exec(char *line)
         {
             dbg_printf("OK blink CH%u at 1 Hz (blink 0 to stop)\r\n", (unsigned)s_blink_ch);
         }
+    }
+    else if (strcmp(argv[0], "relaypol") == 0)
+    {
+        if (argc < 2u || !app_parse_u16(argv[1], &v) || v > 1u)
+        {
+            dbg_write("ERR relaypol <0=high-trigger|1=low-trigger>\r\n");
+            return;
+        }
+        app_relay_set_polarity((uint8_t)v);
+        dbg_printf("OK relay polarity=%s\r\n", v ? "LOW" : "HIGH");
     }
     else if (strcmp(argv[0], "forget") == 0)
     {

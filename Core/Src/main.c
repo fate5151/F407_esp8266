@@ -118,6 +118,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  app_relay_preinit();                        /* 立刻把继电器拉到"断开"电平 */
   MX_USART1_UART_Init();
   MX_TIM8_Init();
   MX_USART3_UART_Init();
