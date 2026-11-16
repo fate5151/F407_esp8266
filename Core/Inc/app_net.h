@@ -27,6 +27,7 @@ extern "C" {
 typedef enum
 {
     APP_NET_IDLE = 0,        /* 未启动 */
+    APP_NET_CLEAN,           /* AT+CIPCLOSE=5：关掉上次遗留的 TCP 链路 */
     APP_NET_WAIT_MODULE,     /* 等模块回应 AT */
     APP_NET_SET_MODE,        /* AT+CWMODE=1 */
     APP_NET_JOIN_AP,         /* AT+CWJAP */
@@ -59,6 +60,9 @@ const char *app_net_ip(void);
 
 /* 服务器已就绪（可以访问网页） */
 uint8_t app_net_running(void);
+
+/* 调试用：把一条原始 AT 命令发给模块，并把 1.5 s 内的回显打到 USART1 */
+void app_net_raw(const char *cmd);
 
 /* USART3 中断转发，由 HAL_UART_RxCplt/ErrorCallback 调用 */
 void app_net_rx_complete(void);

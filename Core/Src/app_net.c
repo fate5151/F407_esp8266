@@ -59,6 +59,11 @@ static char     s_ssid[33];
 static char     s_pwd[65];
 static char     s_ip[20];
 static uint8_t  s_link;               /* 当前处理的 TCP 连接号 */
+static uint32_t s_ipd_skip;           /* 当前 +IPD 帧里还没丢弃的字节数 */
+static uint16_t s_mark;               /* 发 CIPSEND 时流缓冲的长度，用来保护已收到的客户端数据 */
+static uint32_t s_raw_until;          /* 调试透传的结束时刻，0 = 未启用 */
+
+#define NET_NOT_FOUND 0xFFFFu
 
 static void net_issue(const char *cmd, uint32_t timeout_ms);
 static void net_enter(app_net_state_t st);
@@ -150,6 +155,56 @@ static uint8_t net_has(const char *tok)
     return (strstr(s_stream, tok) != NULL) ? 1u : 0u;
 }
 
+/* 删掉流缓冲里 [from, to) 这一段，后面的数据前移 */
+static void stream_drop_range(uint16_t from, uint16_t to)
+{
+    if (to > s_stream_len)
+    {
+        to = s_stream_len;
+    }
+    if (from >= to)
+    {
+        return;
+    }
+
+    memmove(&s_stream[from], &s_stream[to], (size_t)(s_stream_len - to));
+    s_stream_len = (uint16_t)(s_stream_len - (to - from));
+    s_stream[s_stream_len] = '\0';
+}
+
+/* 在 mark 之后找 tok，返回绝对偏移；找不到返回 NET_NOT_FOUND */
+static uint16_t net_find_after(uint16_t mark, const char *tok)
+{
+    const char *p;
+
+    if (mark >= s_stream_len)
+    {
+        return NET_NOT_FOUND;
+    }
+
+    p = strstr(s_stream + mark, tok);
+    return (p == NULL) ? NET_NOT_FOUND : (uint16_t)(p - s_stream);
+}
+
+/* 把 mark 之后到 tok 结尾（含 CRLF）的 AT 回显删掉，保留其他数据 */
+static void net_drop_response(uint16_t mark, uint16_t tok_off, size_t tok_len)
+{
+    uint16_t to;
+
+    if (tok_off == NET_NOT_FOUND)
+    {
+        stream_drop_range(mark, s_stream_len);
+        return;
+    }
+
+    to = (uint16_t)(tok_off + tok_len);
+    while (to < s_stream_len && (s_stream[to] == '\r' || s_stream[to] == '\n'))
+    {
+        to++;
+    }
+    stream_drop_range(mark, to);
+}
+
 /* 把 ISR 环形缓冲一次性搬完（每次 10 ms 最多进 115 字节，缓冲区够） */
 static void net_drain(void)
 {
@@ -187,6 +242,16 @@ static void net_enter(app_net_state_t st)
 static void net_issue(const char *cmd, uint32_t timeout_ms)
 {
     stream_clear();
+    net_send(cmd);
+    s_deadline = HAL_GetTick() + timeout_ms;
+    s_waiting = 1u;
+}
+
+/* 发 CIPSEND 专用：不清空流缓冲，只记下当前位置，
+   这样已经收到的下一帧客户端数据不会丢 */
+static void net_issue_keep(const char *cmd, uint32_t timeout_ms)
+{
+    s_mark = s_stream_len;
     net_send(cmd);
     s_deadline = HAL_GetTick() + timeout_ms;
     s_waiting = 1u;
@@ -338,6 +403,8 @@ static void http_handle(const char *data, uint16_t len)
         *end = '\0';
     }
 
+    dbg_printf("http: %s\r\n", path);        /* 调试：看手机到底请求了什么 */
+
     if (path[0] == '/' && path[1] == '\0')
     {
         page_build();
@@ -384,24 +451,49 @@ static void net_start_send(void)
 {
     (void)snprintf(s_cmd, sizeof(s_cmd), "AT+CIPSEND=%u,%u\r\n",
                    (unsigned)s_link, (unsigned)s_tx_len);
-    net_issue(s_cmd, 2000u);
+    net_issue_keep(s_cmd, 2000u);
     s_state = APP_NET_SEND_PROMPT;
     s_waiting = 1u;
 }
 
-/* 解析 "+IPD,<link>,<len>:<data>" */
+/* 解析 "+IPD,<link>,<len>:<data>"
+ * 只取请求行（到第一个 CRLF）就够用，帧里剩下的请求头按 len 直接丢弃，
+ * 这样浏览器几百字节的请求头不会把 512 B 的流缓冲撑爆。 */
 static void net_parse_ipd(void)
 {
     for (;;)
     {
-        char *p = strstr(s_stream, "+IPD,");
+        char *p;
         char *colon;
+        char *eol;
         unsigned link = 0u;
         unsigned len = 0u;
         uint16_t data_off;
+        uint16_t line_len;
 
+        /* 1) 先把上一帧剩下的字节丢掉 */
+        if (s_ipd_skip > 0u)
+        {
+            uint32_t drop = ((uint32_t)s_stream_len < s_ipd_skip)
+                            ? (uint32_t)s_stream_len : s_ipd_skip;
+
+            stream_drop((uint16_t)drop);
+            s_ipd_skip -= drop;
+            if (s_ipd_skip > 0u)
+            {
+                return;                      /* 这一帧还没走完 */
+            }
+        }
+
+        p = strstr(s_stream, "+IPD,");
         if (p == NULL)
         {
+            if (net_has(",CONNECT"))
+            {
+                dbg_write("net: client connect\r\n");
+                stream_clear();
+                return;
+            }
             if (s_stream_len > 128u)
             {
                 stream_clear();              /* 没有 +IPD 的噪声，丢掉免得塞满 */
@@ -415,21 +507,46 @@ static void net_parse_ipd(void)
             return;                          /* 头部还没收全 */
         }
 
-        if (sscanf(p + 5, "%u,%u", &link, &len) != 2 || len > NET_TX_MAX)
+        if (sscanf(p + 5, "%u,%u", &link, &len) != 2 || len == 0u || len > 8192u)
         {
             stream_drop((uint16_t)(p - s_stream) + 5u);
             continue;
         }
 
         data_off = (uint16_t)(colon - s_stream) + 1u;
-        if ((uint32_t)s_stream_len < (uint32_t)data_off + len)
+        eol = strstr(s_stream + data_off, "\r\n");
+        if (eol == NULL)
         {
-            return;                          /* 数据还没收全 */
+            if (s_stream_len >= (NET_STREAM_MAX - 1u))
+            {
+                /* 请求行太长，放弃这一帧，按声明长度跳过 */
+                stream_drop(data_off);
+                s_ipd_skip = len;
+            }
+            return;                          /* 请求行还没收全 */
         }
 
+        line_len = (uint16_t)((eol - (s_stream + data_off)) + 2u);
         s_link = (uint8_t)link;
-        http_handle(s_stream + data_off, (uint16_t)len);
-        stream_drop((uint16_t)(data_off + len));
+        http_handle(s_stream + data_off, line_len);
+
+        /* 这一帧除了请求行还有多少字节（浏览器那几百字节请求头）：
+           已经从流里收到的就地删掉，还没到的记到 skip 里后续丢弃，
+           这样既不会把 512 B 缓冲撑爆，也不会误删下一帧 */
+        {
+            uint32_t frame_rest;
+            uint32_t in_stream;
+            uint32_t drop_now;
+
+            stream_drop((uint16_t)((uint32_t)data_off + (uint32_t)line_len));
+            frame_rest = (len > (uint32_t)line_len)
+                         ? ((uint32_t)len - (uint32_t)line_len) : 0u;
+            in_stream = (uint32_t)s_stream_len;
+            drop_now = (frame_rest < in_stream) ? frame_rest : in_stream;
+            stream_drop((uint16_t)drop_now);
+            s_ipd_skip = frame_rest - drop_now;
+        }
+
         net_start_send();
         return;                              /* 发送交给状态机，回 RUN 再继续 */
     }
@@ -459,6 +576,22 @@ void app_net_task(void)
 {
     net_drain();
 
+    /* 调试透传：1.5 s 内把模块回显原样打出来，期间暂停状态机 */
+    if (s_raw_until != 0u)
+    {
+        if ((int32_t)(HAL_GetTick() - s_raw_until) < 0)
+        {
+            if (s_stream_len > 0u)
+            {
+                dbg_printf("raw: %s\r\n", s_stream);
+                stream_clear();
+            }
+            return;
+        }
+        s_raw_until = 0u;
+        stream_clear();
+    }
+
     if (!s_started)
     {
         return;
@@ -466,6 +599,19 @@ void app_net_task(void)
 
     switch (s_state)
     {
+    case APP_NET_CLEAN:
+        if (!s_waiting)
+        {
+            /* CIPMUX=1 时 CIPCLOSE=5 表示关掉全部链路；不支持就忽略回显 */
+            net_issue("AT+CIPCLOSE=5\r\n", 800u);
+        }
+        else if (net_has("OK\r\n") || net_has("ERROR") || net_has("link is not valid") ||
+                 net_timeout())
+        {
+            net_enter(APP_NET_WAIT_MODULE);
+        }
+        break;
+
     case APP_NET_WAIT_MODULE:
         if (!s_waiting)
         {
@@ -518,8 +664,10 @@ void app_net_task(void)
         }
         else if (net_has("FAIL") || net_has("ERROR") || net_timeout())
         {
-            dbg_write("net: join AP failed\r\n");
-            net_retry_or_fail();
+            /* 已经连着同一个 AP 时再 CWJAP 会报错，这里不拦，继续往下走；
+               真正没连上的话后面的 CIFSR 会拿到 0.0.0.0，再回到重试流程 */
+            dbg_write("net: join failed, continue anyway\r\n");
+            net_enter(APP_NET_SET_MUX);
         }
         break;
 
@@ -561,8 +709,16 @@ void app_net_task(void)
         else if (net_has("STAIP"))
         {
             net_parse_ip();
-            net_enter(APP_NET_RUN);
-            dbg_printf("net: server ready at http://%s/\r\n", s_ip);
+            if (s_ip[0] == '\0' || strcmp(s_ip, "0.0.0.0") == 0)
+            {
+                dbg_write("net: no IP yet, retry whole sequence\r\n");
+                net_enter(APP_NET_FAILED);
+            }
+            else
+            {
+                net_enter(APP_NET_RUN);
+                dbg_printf("net: server ready at http://%s/\r\n", s_ip);
+            }
         }
         else if (net_has("OK\r\n") || net_timeout())
         {
@@ -576,28 +732,54 @@ void app_net_task(void)
         break;
 
     case APP_NET_SEND_PROMPT:
-        if (net_has(">"))
+    {
+        uint16_t off = net_find_after(s_mark, ">");
+
+        if (off != NET_NOT_FOUND)
         {
+            stream_drop_range(s_mark, (uint16_t)(off + 1u));
+            s_mark = s_stream_len;
             (void)HAL_UART_Transmit(&huart3, (uint8_t *)s_tx, s_tx_len, 1500u);
-            stream_clear();
             s_deadline = HAL_GetTick() + 3000u;
             s_state = APP_NET_SEND_DATA;
         }
         else if (net_timeout())
         {
+            dbg_printf("send: no prompt, module said [%s]\r\n", s_stream + s_mark);
+            net_drop_response(s_mark, NET_NOT_FOUND, 0u);
             net_send_close();
             net_enter(APP_NET_RUN);
         }
         break;
+    }
 
     case APP_NET_SEND_DATA:
-        if (net_has("SEND OK") || net_has("OK\r\n") || net_has("SEND FAIL") ||
-            net_timeout())
+    {
+        uint16_t ok = net_find_after(s_mark, "SEND OK");
+        uint16_t fail = net_find_after(s_mark, "SEND FAIL");
+
+        if (ok != NET_NOT_FOUND)
         {
+            net_drop_response(s_mark, ok, 7u);
+            net_send_close();
+            net_enter(APP_NET_RUN);
+        }
+        else if (fail != NET_NOT_FOUND)
+        {
+            net_drop_response(s_mark, fail, 9u);
+            dbg_write("send: SEND FAIL\r\n");
+            net_send_close();
+            net_enter(APP_NET_RUN);
+        }
+        else if (net_timeout())
+        {
+            dbg_printf("send: no SEND OK, module said [%s]\r\n", s_stream + s_mark);
+            net_drop_response(s_mark, NET_NOT_FOUND, 0u);
             net_send_close();
             net_enter(APP_NET_RUN);
         }
         break;
+    }
 
     case APP_NET_FAILED:
         if (!s_waiting)
@@ -625,6 +807,7 @@ void app_net_init(void)
     s_ring_tail = 0u;
     s_ip[0] = '\0';
     s_link = 0u;
+    s_ipd_skip = 0u;
     stream_clear();
     tx_reset();
     s_started = 0u;
@@ -660,7 +843,9 @@ uint8_t app_net_start(const char *ssid, const char *pwd)
 
     s_started = 1u;
     s_ip[0] = '\0';
-    net_enter(APP_NET_WAIT_MODULE);
+    s_ipd_skip = 0u;
+    stream_clear();
+    net_enter(APP_NET_CLEAN);
     dbg_printf("net: connecting to '%s' ...\r\n", s_ssid);
     return 1u;
 }
@@ -670,6 +855,8 @@ void app_net_stop(void)
     net_send("AT+CIPSERVER=0\r\n");
     s_started = 0u;
     s_ip[0] = '\0';
+    s_ipd_skip = 0u;
+    stream_clear();
     net_enter(APP_NET_IDLE);
 }
 
@@ -682,6 +869,8 @@ const char *app_net_state_name(app_net_state_t st)
 {
     switch (st)
     {
+    case APP_NET_CLEAN:
+        return "CLEAN";
     case APP_NET_WAIT_MODULE:
         return "WAIT_AT";
     case APP_NET_SET_MODE:
@@ -714,6 +903,19 @@ const char *app_net_ip(void)
 uint8_t app_net_running(void)
 {
     return (s_state == APP_NET_RUN) ? 1u : 0u;
+}
+
+void app_net_raw(const char *cmd)
+{
+    if (cmd == NULL || *cmd == '\0')
+    {
+        return;
+    }
+
+    stream_clear();
+    net_send(cmd);
+    net_send("\r\n");
+    s_raw_until = HAL_GetTick() + 1500u;
 }
 
 /* ------------------------------------------------------- 中断入口转发 */

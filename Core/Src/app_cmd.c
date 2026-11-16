@@ -26,8 +26,8 @@
 
 #include <string.h>
 
-#define CMD_RX_SIZE   64u    /* 必须是 2 的幂 */
-#define CMD_LINE_MAX  32u
+#define CMD_RX_SIZE   128u   /* 必须是 2 的幂 */
+#define CMD_LINE_MAX  96u    /* 一行最长 95 字符（wifi 命令要带引号 SSID + 密码） */
 #define CMD_ARG_MAX   4u
 
 static volatile uint8_t  s_rx[CMD_RX_SIZE];
@@ -55,7 +55,9 @@ static void cmd_help(void)
               "  ui <0|1>              1 Hz status line on/off\r\n"
               "  blink <ch>            toggle one relay at 1 Hz (0 = stop)\r\n"
               "  wifi <ssid> <pwd>     join AP, start HTTP server on port 80\r\n"
-              "  net <stop|status>     stop network / show state and IP\r\n");
+              "                        (put SSID in \"quotes\" if it has spaces)\r\n"
+              "  net <stop|status>     stop network / show state and IP\r\n"
+              "  at <AT+...>           send raw AT to ESP8266 (debug)\r\n");
 }
 
 static void cmd_exec(char *line)
@@ -65,6 +67,14 @@ static void cmd_exec(char *line)
     char *p = line;
     uint16_t v;
     uint16_t w;
+
+    /* at <原始 AT 文本>：整行透传给 ESP8266，不再分词 */
+    if (strncmp(line, "at ", 3u) == 0)
+    {
+        app_net_raw(line + 3u);
+        dbg_write("OK raw sent (response shown for 1.5 s)\r\n");
+        return;
+    }
 
     while (*p != '\0' && argc < CMD_ARG_MAX)
     {
@@ -77,11 +87,24 @@ static void cmd_exec(char *line)
             break;
         }
 
-        argv[argc++] = p;
-        while (*p != '\0' && *p != ' ')
+        if (*p == '"')                       /* "SSID 含空格" 这种写法 */
         {
             p++;
+            argv[argc++] = p;
+            while (*p != '\0' && *p != '"')
+            {
+                p++;
+            }
         }
+        else
+        {
+            argv[argc++] = p;
+            while (*p != '\0' && *p != ' ')
+            {
+                p++;
+            }
+        }
+
         if (*p != '\0')
         {
             *p++ = '\0';
@@ -93,7 +116,11 @@ static void cmd_exec(char *line)
         return;
     }
 
-    if (strcmp(argv[0], "help") == 0)
+    if (strcmp(argv[0], "at") == 0)
+    {
+        dbg_write("ERR at <AT+...>\r\n");
+    }
+    else if (strcmp(argv[0], "help") == 0)
     {
         cmd_help();
     }
