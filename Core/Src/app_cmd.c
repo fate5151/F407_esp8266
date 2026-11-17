@@ -9,6 +9,7 @@
   *    relay <ch> <0|1>      switch one relay (ch 1-6)
   *    toggle <ch>           flip one relay (ch 1-6)
   *    th <ug/m3>            dust alarm threshold (10-1000)
+ *    dust [poll]           show raw ADC / voltage / PM
   *    ui <0|1>              1 Hz status line on/off
   ******************************************************************************
   */
@@ -52,6 +53,7 @@ static void cmd_help(void)
               "  relay <ch> <0|1>      switch one relay (ch 1-6)\r\n"
               "  toggle <ch>           flip one relay (ch 1-6)\r\n"
               "  th <ug/m3>            dust alarm threshold (10-1000)\r\n"
+              "  dust [poll]           show raw ADC / voltage / PM (poll = 10 s)\r\n"
               "  ui <0|1>              1 Hz status line on/off\r\n"
               "  blink <ch>            toggle one relay at 1 Hz (0 = stop)\r\n"
               "  relaypol <0|1>        0=high-trigger, 1=low-trigger module\r\n"
@@ -181,6 +183,35 @@ static void cmd_exec(char *line)
         }
         app_ui_enable((uint8_t)v);
         dbg_printf("OK ui=%u\r\n", (unsigned int)v);
+    }
+    else if (strcmp(argv[0], "dust") == 0)
+    {
+        if (argc >= 2u && strcmp(argv[1], "poll") == 0)
+        {
+            uint32_t end = HAL_GetTick() + 10000u;
+
+            dbg_write("dust: polling 10 s (blow on the sensor now)\r\n");
+            while ((int32_t)(HAL_GetTick() - end) < 0)
+            {
+                uint16_t raw = app_dust_raw();
+                uint32_t mv = (uint32_t)raw * 3300u / 4095u;
+
+                dbg_printf("dust: raw=%4u adc=%4lumV Vo=%4lumV PM=%u\r\n",
+                           (unsigned)raw, (unsigned long)mv,
+                           (unsigned long)(mv * 2u), (unsigned)app_dust_pm());
+                HAL_Delay(400u);
+            }
+        }
+        else
+        {
+            uint16_t raw = app_dust_raw();
+            uint32_t mv = (uint32_t)raw * 3300u / 4095u;
+
+            dbg_printf("DUST raw=%u adc=%lumV Vo=%lumV PM=%u TH=%u LV=%s\r\n",
+                       (unsigned)raw, (unsigned long)mv, (unsigned long)(mv * 2u),
+                       (unsigned)app_dust_pm(), (unsigned)app_dust_threshold(),
+                       app_dust_level_name(app_dust_level()));
+        }
     }
     else if (strcmp(argv[0], "blink") == 0)
     {
