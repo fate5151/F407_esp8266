@@ -38,6 +38,8 @@ typedef enum
     APP_NET_SEND_PROMPT,     /* 等 '>' 提示符 */
     APP_NET_SEND_DATA,       /* 数据已发出，等 SEND OK */
     APP_NET_CLOSING,         /* 等 AT+CIPCLOSE 的 OK，避免新连接撞上 */
+    APP_NET_RECOVER,         /* 补发 CIPSEND 没发完的字节，把模块从"等数据"状态救回来 */
+    APP_NET_PURGE,           /* 最后一招：强灌填充字节顶出模块的等数据状态 */
     APP_NET_FAILED           /* 出错，10 s 后重来 */
 } app_net_state_t;
 

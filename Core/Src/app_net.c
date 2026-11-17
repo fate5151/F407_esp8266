@@ -61,6 +61,16 @@ static uint8_t  s_link;               /* 当前处理的 TCP 连接号 */
 static uint32_t s_ipd_skip;           /* 当前 +IPD 帧里还没丢弃的字节数 */
 static uint16_t s_mark;               /* 发 CIPSEND 时流缓冲的长度，用来保护已收到的客户端数据 */
 static uint32_t s_raw_until;          /* 调试透传的结束时刻，0 = 未启用 */
+static uint16_t s_owed;               /* ESP 还在等我们发多少字节（CIPSEND 欠账） */
+static uint16_t s_purge_left;         /* 强灌填充的剩余字节数，0 = 未启用 */
+static uint8_t  s_purge_tried;        /* 本轮已尝试过强灌，避免死循环 */
+
+/* CIPSEND 单包上限 2048，灌超过它必能凑满模块要的量；
+   多出来的空行（'\r'）模块会当没有命令而忽略 */
+#define NET_PURGE_BYTES 2100u
+static const char k_pad[64] =
+    "\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r"
+    "\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r\r";
 
 #define NET_NOT_FOUND 0xFFFFu
 
@@ -79,6 +89,29 @@ static void net_send(const char *s)
     {
         (void)HAL_UART_Transmit(&huart3, (uint8_t *)s, (uint16_t)len, 200u);
     }
+}
+
+/* 发送并返回"实际发出去多少字节"。
+   HAL_UART_Transmit 超时会只发一部分就返回（返回值却只有一个 HAL_TIMEOUT），
+   剩余量留在 huart->TxXferCount 里 —— CIPSEND 的数据必须全部发完，
+   少一个字节 ESP 就会一直停在"等数据"状态，再也不回应 AT 命令。 */
+static uint16_t net_send_counted(const char *s, uint16_t len, uint32_t timeout)
+{
+    uint16_t left;
+
+    if (len == 0u)
+    {
+        return 0u;
+    }
+
+    (void)HAL_UART_Transmit(&huart3, (uint8_t *)s, len, timeout);
+
+    left = (uint16_t)huart3.TxXferCount;
+    if (left > len)                 /* 异常值：当作全部发完，别把欠账算错 */
+    {
+        left = 0u;
+    }
+    return (uint16_t)(len - left);
 }
 
 static void tx_reset(void)
@@ -500,6 +533,7 @@ static void net_start_send(void)
     net_issue_keep(s_cmd, 2000u);
     s_state = APP_NET_SEND_PROMPT;
     s_waiting = 1u;
+    s_owed = 0u;                    /* 还没拿到 '>'，数据一个字节都还没发 */
 }
 
 /* 解析 "+IPD,<link>,<len>:<data>"
@@ -668,10 +702,33 @@ void app_net_task(void)
     case APP_NET_WAIT_MODULE:
         if (!s_waiting)
         {
-            net_issue("AT\r\n", 1000u);
+            /* 先还 CIPSEND 的欠账，否则模块理都不理 AT */
+            if (s_owed > 0u)
+            {
+                uint16_t chunk = (s_owed > 256u) ? (uint16_t)256u : s_owed;
+                uint16_t sent = net_send_counted(&s_tx[s_tx_len - s_owed], chunk, 1000u);
+
+                s_owed = (uint16_t)(s_owed - sent);
+                dbg_printf("net: paying CIPSEND debt, %u bytes left\r\n", (unsigned)s_owed);
+                s_deadline = HAL_GetTick() + 120u;
+                s_waiting = 1u;
+                s_retry = 0u;
+            }
+            else
+            {
+                net_issue("AT\r\n", 1000u);
+            }
+        }
+        else if (s_owed > 0u)
+        {
+            if (net_timeout())
+            {
+                s_waiting = 0u;         /* 让下一拍继续还账 */
+            }
         }
         else if (net_has("OK\r\n"))
         {
+            s_purge_tried = 0u;
             net_enter(APP_NET_SET_MODE);
         }
         else if (net_has("ERROR") || net_timeout())
@@ -680,11 +737,45 @@ void app_net_task(void)
             {
                 s_waiting = 0u;
             }
+            else if (s_purge_tried == 0u)
+            {
+                /* AT 完全没回应：典型是模块卡在等 CIPSEND 数据，
+                   灌满填充字节把它顶出来再试一次 */
+                dbg_write("net: no module answer, purging USART3\r\n");
+                s_purge_tried = 1u;
+                s_purge_left = NET_PURGE_BYTES;
+                net_enter(APP_NET_PURGE);
+            }
             else
             {
                 dbg_write("net: no module answer on USART3\r\n");
                 net_enter(APP_NET_FAILED);
             }
+        }
+        break;
+
+    case APP_NET_PURGE:
+        if (s_purge_left == 0u)
+        {
+            dbg_write("net: module purged, retrying AT\r\n");
+            net_enter(APP_NET_CLEAN);
+        }
+        else if (!s_waiting)
+        {
+            uint16_t chunk = (s_purge_left > 64u) ? (uint16_t)64u : s_purge_left;
+            uint16_t sent = net_send_counted(k_pad, chunk, 500u);
+
+            s_purge_left = (uint16_t)(s_purge_left - sent);
+            if (sent == 0u && ++s_retry > 8u)
+            {
+                s_purge_left = 0u;      /* 串口发不动了，别死等 */
+            }
+            s_deadline = HAL_GetTick() + 20u;
+            s_waiting = 1u;
+        }
+        else if (net_timeout())
+        {
+            s_waiting = 0u;
         }
         break;
 
@@ -803,17 +894,31 @@ void app_net_task(void)
 
         if (off != NET_NOT_FOUND)
         {
+            uint16_t sent;
+
             stream_drop_range(s_mark, (uint16_t)(off + 1u));
             s_mark = s_stream_len;
-            (void)HAL_UART_Transmit(&huart3, (uint8_t *)s_tx, s_tx_len, 1500u);
+
+            /* 关键：必须知道实发多少，才能补齐欠账 */
+            sent = net_send_counted(s_tx, s_tx_len, 1500u);
+            s_owed = (uint16_t)(s_tx_len - sent);
+            if (s_owed != 0u)
+            {
+                dbg_printf("send: short write, %u/%u bytes pending\r\n",
+                           (unsigned)s_owed, (unsigned)s_tx_len);
+            }
+
             s_deadline = HAL_GetTick() + 3000u;
             s_state = APP_NET_SEND_DATA;
         }
         else if (net_timeout())
         {
+            /* 没等到 '>'：一个字节都没发出去，追回欠账后重走启动序列，
+               模块可能还停在"等 CIPSEND 数据"，光发 AT 是救不回来的 */
             dbg_printf("send: no prompt, module said [%s]\r\n", s_stream + s_mark);
             net_drop_response(s_mark, NET_NOT_FOUND, 0u);
             net_send_close();
+            s_owed = 0u;
             net_enter(APP_NET_RUN);
         }
         break;
@@ -827,22 +932,64 @@ void app_net_task(void)
         if (ok != NET_NOT_FOUND)
         {
             net_drop_response(s_mark, ok, 7u);
+            s_owed = 0u;
             net_begin_close();       /* 关掉 link，等 OK 再收下一个连接 */
         }
         else if (fail != NET_NOT_FOUND)
         {
             net_drop_response(s_mark, fail, 9u);
             dbg_write("send: SEND FAIL\r\n");
+            s_owed = 0u;
             net_begin_close();
         }
         else if (net_timeout())
         {
             dbg_printf("send: no SEND OK, module said [%s]\r\n", s_stream + s_mark);
             net_drop_response(s_mark, NET_NOT_FOUND, 0u);
-            net_begin_close();
+            net_send_close();
+            if (s_owed != 0u)
+            {
+                /* 还欠字节 → 模块正等着，先把数据补齐再回运行态 */
+                net_enter(APP_NET_RECOVER);
+            }
+            else
+            {
+                net_begin_close();
+            }
         }
         break;
     }
+
+    case APP_NET_RECOVER:
+        /* 把 CIPSEND 欠下的字节发完。ESP 在"等 N 字节"状态下会忽略一切 AT，
+           只有凑够字节（或断电）才能退出，所以这里必须精确补完 */
+        if (s_owed == 0u)
+        {
+            dbg_write("net: recovered, restarting AT sequence\r\n");
+            net_enter(APP_NET_CLEAN);
+        }
+        else if (!s_waiting)
+        {
+            uint16_t chunk = (s_owed > 256u) ? (uint16_t)256u : s_owed;
+            uint16_t sent = net_send_counted(&s_tx[s_tx_len - s_owed], chunk, 1000u);
+
+            s_owed = (uint16_t)(s_owed - sent);
+            s_retry++;
+            s_deadline = HAL_GetTick() + 100u;
+            s_waiting = 1u;
+
+            if (sent == 0u && s_retry > 20u)
+            {
+                dbg_write("net: recover stuck, give up (power cycle needed)\r\n");
+                s_owed = 0u;
+                net_enter(APP_NET_FAILED);
+            }
+        }
+        else if (net_timeout())
+        {
+            s_waiting = 0u;
+        }
+        break;
 
     case APP_NET_CLOSING:
         if (net_has("OK\r\n") || net_has("ERROR") || net_has("link is not valid") ||
@@ -946,6 +1093,9 @@ uint8_t app_net_start(const char *ssid, const char *pwd)
     s_started = 1u;
     s_ip[0] = '\0';
     s_ipd_skip = 0u;
+    s_owed = 0u;
+    s_purge_left = 0u;
+    s_purge_tried = 0u;
     stream_clear();
     net_enter(APP_NET_CLEAN);
     dbg_printf("net: connecting to '%s' ...\r\n", s_ssid);
@@ -990,6 +1140,8 @@ const char *app_net_state_name(app_net_state_t st)
     case APP_NET_SEND_PROMPT:
     case APP_NET_SEND_DATA:
     case APP_NET_CLOSING:
+    case APP_NET_RECOVER:
+    case APP_NET_PURGE:
         return "SENDING";
     case APP_NET_FAILED:
         return "FAILED";
