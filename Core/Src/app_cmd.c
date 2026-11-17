@@ -10,7 +10,8 @@
   *    toggle <ch>           flip one relay (ch 1-3)
   *    th <ug/m3>            dust alarm threshold (10-1000)
  *    dust [poll]           show raw ADC / voltage / PM
-  *    ui <0|1>              1 Hz status line on/off
+  *    wifiset               open WiFi SSID/PASS editor on the LCD
+ *    ui <0|1>              1 Hz status line on/off
   ******************************************************************************
   */
 
@@ -72,7 +73,7 @@ static void dust_poll_tick(void)
     raw = app_dust_raw();
     mv = (uint32_t)raw * 3300u / 4095u;
     dbg_printf("dust: raw=%4u adc=%4lumV Vo=%4lumV PM=%u %s\r\n",
-               (unsigned)raw, (unsigned long)mv, (unsigned long)(mv * 2u),
+               (unsigned)raw, (unsigned long)mv, (unsigned long)(mv * 11u / 10u),
                (unsigned)app_dust_pm(),
                app_dust_signal_ok() ? "" : "(no sensor signal)");
 }
@@ -87,8 +88,10 @@ static void cmd_help(void)
               "  toggle <ch>           flip one relay (ch 1-3)\r\n"
               "  th <ug/m3>            dust alarm threshold (10-1000)\r\n"
               "  dust [poll]           show raw ADC / voltage / PM (poll = 10 s)\r\n"
+              "  wifiset               open WiFi SSID/PASS editor on the LCD\r\n"
+              "  tap <x> <y>           simulate a screen tap (layout debug)\r\n"
               "  ui <0|1>              1 Hz status line on/off\r\n"
-              "  blink <ch>           toggle one relay at 1 Hz (0 = stop)\r\n"
+              "  blink <ch>            toggle one relay at 1 Hz (0 = stop)\r\n"
               "  relaypol <0|1>        0=high-trigger, 1=low-trigger module\r\n"
               "  wifi <ssid> <pwd>     join AP, start HTTP server (saved to flash)\r\n"
               "                        (put SSID in \"quotes\" if it has spaces)\r\n"
@@ -207,6 +210,21 @@ static void cmd_exec(char *line)
         app_dust_set_threshold(v);
         dbg_printf("OK th=%u ug/m3\r\n", (unsigned int)app_dust_threshold());
     }
+    else if (strcmp(argv[0], "wifiset") == 0)
+    {
+        app_lcd_open_wifi_setup();
+    }
+    else if (strcmp(argv[0], "tap") == 0)
+    {
+        /* tap <x> <y>：模拟一次屏幕点击，用来在没有手指的情况下验证布局 */
+        if (argc < 3u || !app_parse_u16(argv[1], &v) || !app_parse_u16(argv[2], &w))
+        {
+            dbg_write("ERR tap <x> <y>\r\n");
+            return;
+        }
+        dbg_printf("tap at (%u,%u)\r\n", (unsigned int)v, (unsigned int)w);
+        app_lcd_handle_tap(v, w);
+    }
     else if (strcmp(argv[0], "ui") == 0)
     {
         if (argc < 2u || !app_parse_u16(argv[1], &v) || v > 1u)
@@ -234,7 +252,7 @@ static void cmd_exec(char *line)
             uint32_t mv = (uint32_t)raw * 3300u / 4095u;
 
             dbg_printf("DUST raw=%u adc=%lumV Vo=%lumV PM=%u TH=%u LV=%s\r\n",
-                       (unsigned)raw, (unsigned long)mv, (unsigned long)(mv * 2u),
+                       (unsigned)raw, (unsigned long)mv, (unsigned long)(mv * 11u / 10u),
                        (unsigned)app_dust_pm(), (unsigned)app_dust_threshold(),
                        app_dust_level_name(app_dust_level()));
             if (!app_dust_signal_ok())

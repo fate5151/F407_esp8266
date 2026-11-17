@@ -70,18 +70,26 @@ static uint16_t median_push(uint16_t v)
     return t[s_win_n / 2u];
 }
 
-/* PM(ug/m3) = (Vo_mV − 900) × 0.2，Vo 由 0.5 分压还原 */
+/* 转接板分压：VO ─ R6(1K) ─ AOUT ─ R10(10K) ─ GND，
+   所以 AOUT = VO × 10/11，反推 VO = AOUT × 11/10 = AOUT × 1.1。
+   （官方例程注释写"乘 11"，实际应是 11/10，乘 11 会大 10 倍）
+
+   浓度按 GP2Y1010 特性曲线拟合：
+     曲线点 (0 mg/m3, 0.9 V)、(0.2 mg/m3, 2.0 V)
+     斜率 = (2000-900)/200 = 5.5 mV per ug/m3
+     PM(ug/m3) = (VO_mV - 900) / 5.5 ≈ (VO_mV - 900) × 0.18
+   与模块资料里的手写推导 y = 0.18x - 0.162 一致 */
 static uint16_t raw_to_pm(uint16_t raw)
 {
-    uint32_t mv = (uint32_t)raw * 3300u / 4095u;   /* 分压后 mV */
-    uint32_t vo = mv * 2u;                         /* 传感器输出 mV */
+    uint32_t mv = (uint32_t)raw * 3300u / 4095u;   /* AOUT 引脚电压 mV */
+    uint32_t vo = mv * 11u / 10u;                  /* 还原传感器 VO */
 
     if (vo <= 900u)
     {
         return 0u;
     }
 
-    return (uint16_t)((vo - 900u) * 2u / 10u);
+    return (uint16_t)((vo - 900u) * 18u / 100u);   /* × 0.18 */
 }
 
 static void level_update(uint16_t pm, uint32_t dt_ms)

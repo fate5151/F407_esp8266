@@ -212,23 +212,13 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 /**
-  * @brief  触摸回调：点继电器方块 → 翻转该路；点 ALL OFF → 全断
-  * @note   屏幕布局坐标由 app_lcd_hit_test() 判定，本函数只管动作
+  * @brief  触摸回调：全部坐标判定交给 app_lcd_handle_tap()
+  * @note   继电器方块 / ALL OFF / WiFi SET / 软键盘都在 app_lcd.c 内部处理，
+  *         main 这边不需要知道屏幕布局
   */
 static void on_touch_click(uint16_t x, uint16_t y)
 {
-  uint8_t hit = app_lcd_hit_test(x, y);
-
-  if (hit >= 1u && hit <= APP_RELAY_COUNT)
-  {
-    app_relay_toggle(hit);
-    app_lcd_update();
-  }
-  else if (hit == APP_LCD_BTN_ALL_OFF)
-  {
-    app_relay_set_mode(0u);
-    app_lcd_update();
-  }
+  app_lcd_handle_tap(x, y);
 }
 
 /* USER CODE END 4 */
