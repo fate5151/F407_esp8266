@@ -51,6 +51,10 @@ void app_dust_set_threshold(uint16_t th);
 
 const char *app_dust_level_name(app_dust_level_t lv);
 
+/* 强制控制 ILED（PA6），排查"读不到数"是接线问题还是模块问题：
+   on = 1 常亮 / 0 常灭 / 2 恢复 TIM3 PWM */
+void app_dust_force_led(uint8_t on);
+
 #ifdef __cplusplus
 }
 #endif

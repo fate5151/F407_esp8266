@@ -11,6 +11,7 @@
 #include "app_cfg.h"
 #include "app_dbg.h"
 #include "main.h"
+#include "tim.h"
 
 #define DUST_WIN_LEN       9u        /* 中位数窗口，抑制气流毛刺 */
 #define DUST_ALARM_COUNT   3u        /* 连续 3 次超阈值才进 ALARM */
@@ -312,6 +313,35 @@ void app_dust_set_threshold(uint16_t th)
 
     s_th = th;
     (void)app_cfg_save_th(th);        /* 掉电保存，内容没变时内部不会真的擦写 */
+}
+
+/* 强制控制 ILED，用来判断"没读数"是接线问题还是模块坏了。
+   on = 1 常亮 / 0 常灭 / 2 恢复 TIM3 PWM 正常输出 */
+void app_dust_force_led(uint8_t on)
+{
+    GPIO_InitTypeDef g = {0};
+
+    if (on == 2u)
+    {
+        g.Pin = GPIO_PIN_6;
+        g.Mode = GPIO_MODE_AF_PP;
+        g.Pull = GPIO_NOPULL;
+        g.Speed = GPIO_SPEED_FREQ_HIGH;
+        g.Alternate = GPIO_AF2_TIM3;
+        HAL_GPIO_Init(GPIOA, &g);
+        (void)HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_1);
+        dbg_write("dust: LED back to TIM3 PWM\r\n");
+        return;
+    }
+
+    (void)HAL_TIM_PWM_Stop(&htim3, TIM_CHANNEL_1);
+    g.Pin = GPIO_PIN_6;
+    g.Mode = GPIO_MODE_OUTPUT_PP;
+    g.Pull = GPIO_NOPULL;
+    g.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOA, &g);
+    HAL_GPIO_WritePin(GPIOA, GPIO_PIN_6, on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+    dbg_printf("dust: ILED forced %s\r\n", on ? "ON (5V)" : "OFF (0V)");
 }
 
 const char *app_dust_level_name(app_dust_level_t lv)

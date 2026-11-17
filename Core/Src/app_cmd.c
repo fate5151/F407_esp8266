@@ -88,6 +88,7 @@ static void cmd_help(void)
               "  toggle <ch>           flip one relay (ch 1-3)\r\n"
               "  th <ug/m3>            dust alarm threshold (10-1000)\r\n"
               "  dust [poll]           show raw ADC / voltage / PM (poll = 10 s)\r\n"
+              "  dust led <0|1|2>      force ILED off/on/back-to-PWM (wiring check)\r\n"
               "  wifiset               open WiFi SSID/PASS editor on the LCD\r\n"
               "  tap <x> <y>           simulate a screen tap (layout debug)\r\n"
               "  ui <0|1>              1 Hz status line on/off\r\n"
@@ -237,7 +238,17 @@ static void cmd_exec(char *line)
     }
     else if (strcmp(argv[0], "dust") == 0)
     {
-        if (argc >= 2u && strcmp(argv[1], "poll") == 0)
+        if (argc >= 2u && strcmp(argv[1], "led") == 0)
+        {
+            /* dust led 1|0|pwm：强制 ILED 常亮/常灭/恢复 PWM，看 AO 是否跟着变 */
+            if (argc < 3u || !app_parse_u16(argv[2], &v) || v > 2u)
+            {
+                dbg_write("ERR dust led <0|1|pwm2>\r\n");
+                return;
+            }
+            app_dust_force_led((uint8_t)v);
+        }
+        else if (argc >= 2u && strcmp(argv[1], "poll") == 0)
         {
             uint32_t now = HAL_GetTick();
 
