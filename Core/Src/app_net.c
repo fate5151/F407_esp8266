@@ -376,11 +376,12 @@ static void page_build(void)
              "<style>body{font-family:sans-serif;margin:16px}"
            "table{border-collapse:collapse}td,th{padding:6px 12px;border:1px solid #ccc}"
            "a{text-decoration:none}.on{background:#e33;color:#fff}.off{background:#eee}"
-           ".hi{color:#e33;font-weight:bold}</style></head><body>");
+           ".hi{color:#e33;font-weight:bold}.nsig{color:#888}</style></head><body>");
     body_add("<h3>F407 Remote</h3><p>PM <b>%u</b> ug/m3 &nbsp; TH %u &nbsp; "
            "<span class=%s>%s</span></p>",
            (unsigned)app_dust_pm(), (unsigned)app_dust_threshold(),
-           (lv == APP_DUST_LEVEL_NORMAL) ? "off" : "hi",
+           (lv == APP_DUST_LEVEL_NORMAL) ? "off"
+             : ((lv == APP_DUST_LEVEL_NOSIG) ? "nsig" : "hi"),
            app_dust_level_name(lv));
     body_add("<table><tr><th>CH</th><th>State</th><th>Action</th></tr>");
 
@@ -396,7 +397,8 @@ static void page_build(void)
         body_add("</table>");
 body_add("<p>TH: <a href=\"/th?v=100\">100</a> <a href=\"/th?v=150\">150</a> "
            "<a href=\"/th?v=200\">200</a>");
-    body_add("<p><a href=\"/all?m=0\">ALL OFF</a> &nbsp; <a href=\"/all?m=63\">ALL ON</a>");
+    body_add("<p><a href=\"/all?m=0\">ALL OFF</a> &nbsp; <a href=\"/all?m=%u\">ALL ON</a>",
+             (unsigned)APP_RELAY_MASK);
     body_add("</body></html>");
 
     /* 头部 + body 拼成完整响应；带 Content-Length 客户端读完即可结束，
@@ -474,7 +476,7 @@ static void http_handle(const char *data, uint16_t len)
         tx_http_redirect();
     }
     else if (strncmp(path, "/all?", 5u) == 0 &&
-             query_get(path + 5, "m", &v) && v <= 0x3Fu)
+             query_get(path + 5, "m", &v) && v <= APP_RELAY_MASK)
     {
         app_relay_set_mode((uint8_t)v);
         tx_http_redirect();

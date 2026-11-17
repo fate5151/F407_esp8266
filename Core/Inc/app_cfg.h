@@ -24,8 +24,15 @@ uint8_t app_cfg_load_wifi(char *ssid, char *pwd);
    返回：0 = 写入失败，1 = 已写入，2 = 内容相同未写入 */
 uint8_t app_cfg_save_wifi(const char *ssid, const char *pwd);
 
-/* 清除保存的账号 */
+/* 清除保存的账号（阈值等其它配置保留） */
 void app_cfg_erase_wifi(void);
+
+/* 粉尘报警阈值：读到返回 1，没保存过返回 0 */
+uint8_t app_cfg_load_th(uint16_t *th);
+
+/* 和已保存的一致就不写 Flash
+   返回：0 = 写入失败，1 = 已写入，2 = 内容相同未写入 */
+uint8_t app_cfg_save_th(uint16_t th);
 
 #ifdef __cplusplus
 }

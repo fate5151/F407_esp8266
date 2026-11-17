@@ -5,9 +5,9 @@
   *
   *    help                  show command list
   *    status                print one status line
-  *    mode <0-63|0x00-0x3F> set all 6 relays by bitmask
-  *    relay <ch> <0|1>      switch one relay (ch 1-6)
-  *    toggle <ch>           flip one relay (ch 1-6)
+  *    mode <0-7|0x0-0x7> set all 3 relays by bitmask
+  *    relay <ch> <0|1>      switch one relay (ch 1-3)
+  *    toggle <ch>           flip one relay (ch 1-3)
   *    th <ug/m3>            dust alarm threshold (10-1000)
  *    dust [poll]           show raw ADC / voltage / PM
   *    ui <0|1>              1 Hz status line on/off
@@ -44,18 +44,51 @@ static uint8_t s_line_len;
 static uint8_t  s_blink_ch;
 static uint32_t s_blink_tick;
 
+/* dust poll：10 s 观测窗口，靠 app_cmd_task 的时间片推进，不阻塞主循环 */
+static uint32_t s_poll_until;
+static uint32_t s_poll_next;
+#define CMD_POLL_MS     10000u
+#define CMD_POLL_STEP_MS 400u
+
+static void dust_poll_tick(void)
+{
+    uint32_t now = HAL_GetTick();
+    uint16_t raw;
+    uint32_t mv;
+
+    if ((int32_t)(now - s_poll_until) >= 0)
+    {
+        s_poll_until = 0u;
+        dbg_write("dust: poll done\r\n");
+        return;
+    }
+
+    if ((int32_t)(now - s_poll_next) < 0)
+    {
+        return;
+    }
+    s_poll_next = now + CMD_POLL_STEP_MS;
+
+    raw = app_dust_raw();
+    mv = (uint32_t)raw * 3300u / 4095u;
+    dbg_printf("dust: raw=%4u adc=%4lumV Vo=%4lumV PM=%u %s\r\n",
+               (unsigned)raw, (unsigned long)mv, (unsigned long)(mv * 2u),
+               (unsigned)app_dust_pm(),
+               app_dust_signal_ok() ? "" : "(no sensor signal)");
+}
+
 static void cmd_help(void)
 {
     dbg_write("commands:\r\n"
               "  help                  show this text\r\n"
               "  status                print one status line\r\n"
-              "  mode <0-63|0x00-0x3F> set all 6 relays by bitmask\r\n"
-              "  relay <ch> <0|1>      switch one relay (ch 1-6)\r\n"
-              "  toggle <ch>           flip one relay (ch 1-6)\r\n"
+              "  mode <0-7|0x0-0x7> set all 3 relays by bitmask\r\n"
+              "  relay <ch> <0|1>      switch one relay (ch 1-3)\r\n"
+              "  toggle <ch>           flip one relay (ch 1-3)\r\n"
               "  th <ug/m3>            dust alarm threshold (10-1000)\r\n"
               "  dust [poll]           show raw ADC / voltage / PM (poll = 10 s)\r\n"
               "  ui <0|1>              1 Hz status line on/off\r\n"
-              "  blink <ch>            toggle one relay at 1 Hz (0 = stop)\r\n"
+              "  blink <ch>           toggle one relay at 1 Hz (0 = stop)\r\n"
               "  relaypol <0|1>        0=high-trigger, 1=low-trigger module\r\n"
               "  wifi <ssid> <pwd>     join AP, start HTTP server (saved to flash)\r\n"
               "                        (put SSID in \"quotes\" if it has spaces)\r\n"
@@ -135,9 +168,9 @@ static void cmd_exec(char *line)
     }
     else if (strcmp(argv[0], "mode") == 0)
     {
-        if (argc < 2u || !app_parse_u16(argv[1], &v) || v > 0x3Fu)
+        if (argc < 2u || !app_parse_u16(argv[1], &v) || v > APP_RELAY_MASK)
         {
-            dbg_write("ERR mode 0-63\r\n");
+            dbg_write("ERR mode 0-7\r\n");
             return;
         }
         app_relay_set_mode((uint8_t)v);
@@ -148,7 +181,7 @@ static void cmd_exec(char *line)
         if (argc < 3u || !app_parse_u16(argv[1], &v) || !app_parse_u16(argv[2], &w) ||
             v < 1u || v > APP_RELAY_COUNT || w > 1u)
         {
-            dbg_write("ERR relay <ch 1-6> <0|1>\r\n");
+            dbg_write("ERR relay <ch 1-3> <0|1>\r\n");
             return;
         }
         app_relay_set_channel((uint8_t)v, (uint8_t)w);
@@ -158,7 +191,7 @@ static void cmd_exec(char *line)
     {
         if (argc < 2u || !app_parse_u16(argv[1], &v) || v < 1u || v > APP_RELAY_COUNT)
         {
-            dbg_write("ERR toggle <ch 1-6>\r\n");
+            dbg_write("ERR toggle <ch 1-3>\r\n");
             return;
         }
         app_relay_toggle((uint8_t)v);
@@ -188,19 +221,12 @@ static void cmd_exec(char *line)
     {
         if (argc >= 2u && strcmp(argv[1], "poll") == 0)
         {
-            uint32_t end = HAL_GetTick() + 10000u;
+            uint32_t now = HAL_GetTick();
 
+            s_poll_until = now + CMD_POLL_MS;
+            s_poll_next = now;
             dbg_write("dust: polling 10 s (blow on the sensor now)\r\n");
-            while ((int32_t)(HAL_GetTick() - end) < 0)
-            {
-                uint16_t raw = app_dust_raw();
-                uint32_t mv = (uint32_t)raw * 3300u / 4095u;
-
-                dbg_printf("dust: raw=%4u adc=%4lumV Vo=%4lumV PM=%u\r\n",
-                           (unsigned)raw, (unsigned long)mv,
-                           (unsigned long)(mv * 2u), (unsigned)app_dust_pm());
-                HAL_Delay(400u);
-            }
+            dust_poll_tick();
         }
         else
         {
@@ -211,13 +237,19 @@ static void cmd_exec(char *line)
                        (unsigned)raw, (unsigned long)mv, (unsigned long)(mv * 2u),
                        (unsigned)app_dust_pm(), (unsigned)app_dust_threshold(),
                        app_dust_level_name(app_dust_level()));
+            if (!app_dust_signal_ok())
+            {
+                dbg_printf("dust: no signal (raw < %u for > %u s) - check VCC/GND/ILED/AO\r\n",
+                           (unsigned)APP_DUST_NOSIG_RAW,
+                           (unsigned)(APP_DUST_NOSIG_MS / 1000u));
+            }
         }
     }
     else if (strcmp(argv[0], "blink") == 0)
     {
         if (argc < 2u || !app_parse_u16(argv[1], &v) || v > APP_RELAY_COUNT)
         {
-            dbg_write("ERR blink <ch 0-6>\r\n");
+            dbg_write("ERR blink <ch 0-3>\r\n");
             return;
         }
         s_blink_ch = (uint8_t)v;
@@ -331,11 +363,18 @@ void app_cmd_init(void)
     s_line_len = 0u;
     s_blink_ch = 0u;
     s_blink_tick = HAL_GetTick();
+    s_poll_until = 0u;
+    s_poll_next = 0u;
     (void)HAL_UART_Receive_IT(&huart1, &s_rx_byte, 1u);
 }
 
 void app_cmd_task(void)
 {
+    if (s_poll_until != 0u)
+    {
+        dust_poll_tick();
+    }
+
     if (s_blink_ch != 0u)
     {
         uint32_t now = HAL_GetTick();

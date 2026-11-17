@@ -14,7 +14,8 @@ extern "C" {
 
 #include <stdint.h>
 
-#define APP_RELAY_COUNT 6u
+#define APP_RELAY_COUNT 3u
+#define APP_RELAY_MASK  ((uint8_t)((1u << APP_RELAY_COUNT) - 1u))   /* 0x07 */
 
 /* 上电后立刻调用（MX_GPIO_Init 之后）：按保存的极性把引脚拉到"断开"电平，
    避免低电平触发模块在复位瞬间 6 路全吸合 */

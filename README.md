@@ -1,13 +1,13 @@
 # F407_esp8266
 
-STM32F407ZGTx（正点原子探索者 V2.61）上的「6 路继电器 + 触摸屏 + WiFi 远程 + 粉尘监测报警」工程，
+STM32F407ZGTx（正点原子探索者 V2.61）上的「3 路继电器 + 触摸屏 + WiFi 远程 + 粉尘监测报警」工程，
 CubeMX 生成的 CMake 工程，HAL 库 + arm-none-eabi-gcc，VS Code + Cortex-Debug + pyOCD 烧录。
 
 ## 硬件与外设
 
 | 功能 | 外设 | 引脚 | 关键参数 |
 |---|---|---|---|
-| 6 路继电器 | GPIO 输出 | PC0~PC5 | 低/高电平触发可切换（存 Flash） |
+| 3 路继电器 | GPIO 输出 | PC0~PC5 | 低/高电平触发可切换（存 Flash） |
 | 蜂鸣器 | GPIO | PC8 | 经 S8050，高电平响 |
 | 状态灯 | GPIO | PC9 | 高电平亮 |
 | 粉尘 ADC | ADC1_IN4 | PA4 | 12 bit、480 cycles、TIM3_TRGO 下降沿触发 |
@@ -21,7 +21,7 @@ CubeMX 生成的 CMake 工程，HAL 库 + arm-none-eabi-gcc，VS Code + Cortex-D
 ## 代码结构
 
 ```
-Core/Src/app_relay.c   6 路继电器位掩码（模式号 0~63）
+Core/Src/app_relay.c   3 路继电器位掩码（模式号 0~7）
 Core/Src/app_dust.c    ADC 采样 → 9 点中位数 → PM 换算 → 回差报警状态机
 Core/Src/app_alarm.c   蜂鸣器 + 状态灯报警指示，ALARM 时自动开排风 CH2
 Core/Src/app_net.c     ESP8266（USART3）AT 联网 + HTTP 服务器，浏览器远程控制
@@ -61,7 +61,7 @@ VS Code 里 `Ctrl+Shift+B` 会先编译再调用 pyOCD 烧录（见 `.vscode/tas
 ```
 help                  列出命令
 status                立刻打印一行状态
-mode <0-63|0x3F>      按位掩码一次性设置 6 路继电器
+mode <0-7|0x7>      按位掩码一次性设置 3 路继电器
 relay <ch> <0|1>      单路开/关，ch 1~6
 toggle <ch>           单路翻转
 blink <ch|0>          某路 1 Hz 点动（听声音/量通断），0 = 停
@@ -90,19 +90,19 @@ wifi MyHome_2.4G 12345678
 # → net: server ready at http://192.168.1.23/
 ```
 
-手机连同一个 WiFi，浏览器打开该 IP：页面每 3 秒刷新，可翻转 CH1~CH6、
+手机连同一个 WiFi，浏览器打开该 IP：页面每 3 秒刷新，可翻转 CH1~CH3、
 改报警阈值；PM 超阈值页面标红，并自动闭合 CH2（排风），解除后恢复 CH2 原状态。
 
-也可以直接打接口：`/relay?ch=1&on=1`、`/toggle?ch=1`、`/all?m=63`、`/th?v=150`。
+也可以直接打接口：`/relay?ch=1&on=1`、`/toggle?ch=1`、`/all?m=7`、`/th?v=150`。
 
 > 说明：ESP8266 只支持 2.4 GHz WiFi；AT 固件走 USART3（115200）。
 
 ## 进度
 
 - ✅ 外设配置、CMake 工程、业务代码骨架（编译零告警）
-- ✅ T7 显示：3.5 寸 TFTLCD（NT35310 / 320×480 竖屏 / FSMC NE4），屏上显示 6 路状态 + PM + 阈值 + 网络
+- ✅ T7 显示：3.5 寸 TFTLCD（NT35310 / 320×480 竖屏 / FSMC NE4），屏上显示 3 路状态 + PM + 阈值 + 网络
 - ✅ 触摸控制：点屏幕方块翻转对应继电器，点 ALL OFF 全断（XPT2046，4 点校准存 Flash）
-- ✅ 远程控制：ESP8266 AT 联网 + HTTP 页面控制 6 路继电器 / 阈值（T8/T9）；
+- ✅ 远程控制：ESP8266 AT 联网 + HTTP 页面控制 3 路继电器 / 阈值（T8/T9）；
   手机实测页面正常、点按钮继电器动作；WiFi 账号掉电保存 + 热点断开自动重连
 - ⏳ T1~T6、T9 联动上板实测（逐项验证流程见 [开发指南.md](开发指南.md)）
 

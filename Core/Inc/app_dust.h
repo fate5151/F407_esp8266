@@ -16,11 +16,17 @@ extern "C" {
 
 #define APP_DUST_TH_DEFAULT 150u   /* 默认报警阈值 ug/m3 */
 
+/* 无信号判据：正常工作、无尘时 Vo≈0.9 V → 分压后 ADC raw≈558。
+   raw 长期低于 APP_DUST_NOSIG_RAW 说明 Vo 根本没输出（没接模块 / LED 坏 / 光路断） */
+#define APP_DUST_NOSIG_RAW  300u
+#define APP_DUST_NOSIG_MS   10000u
+
 typedef enum
 {
     APP_DUST_LEVEL_NORMAL = 0,
     APP_DUST_LEVEL_WARN,
-    APP_DUST_LEVEL_ALARM
+    APP_DUST_LEVEL_ALARM,
+    APP_DUST_LEVEL_NOSIG          /* 传感器无信号：没接 / LED 或光路坏了 */
 } app_dust_level_t;
 
 /* 清空滤波窗口，状态复位到 NORMAL */
@@ -36,6 +42,9 @@ void app_dust_task(void);
 uint16_t app_dust_pm(void);          /* 中位数换算后的浓度 ug/m3 */
 uint16_t app_dust_raw(void);         /* 最近一次 ADC 原始值 */
 app_dust_level_t app_dust_level(void);
+
+/* 1 = 传感器有正常信号；0 = raw 长时间低于下限（未接 / LED 或光路损坏） */
+uint8_t app_dust_signal_ok(void);
 
 uint16_t app_dust_threshold(void);
 void app_dust_set_threshold(uint16_t th);

@@ -129,6 +129,7 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   uint32_t tick_10ms = HAL_GetTick();
+  uint32_t tick_200ms = tick_10ms;
   uint32_t tick_1s = tick_10ms;
 
   while (1)
@@ -145,11 +146,16 @@ int main(void)
       app_touch_task(on_touch_click);
     }
 
+    if ((now - tick_200ms) >= 200u)           /* 200 ms 时基：屏幕局部刷新 */
+    {
+      tick_200ms = now;
+      app_lcd_update();
+    }
+
     if ((now - tick_1s) >= 1000u)             /* 1 s 时基：状态输出 */
     {
       tick_1s = now;
       app_ui_task();
-      app_lcd_update();
     }
     /* USER CODE END WHILE */
 
