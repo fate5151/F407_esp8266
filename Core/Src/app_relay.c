@@ -155,9 +155,9 @@ static void relay_state_save(uint8_t mode)
     HAL_FLASH_Lock();
 }
 
-/* 一块继电器模块只有 3 路：PC0 / PC1 / PC2 */
+/* 一块继电器模块只有 3 路：PC0 / PC1 / PC2（CubeMX 标签 RELAY1~RELAY3） */
 static const uint16_t k_relay_pin[APP_RELAY_COUNT] = {
-    RELAY_Pin, RELAYC1_Pin, RELAYC2_Pin
+    RELAY1_Pin, RELAY2_Pin, RELAY3_Pin
 };
 
 void app_relay_init(void)

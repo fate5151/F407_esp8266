@@ -55,8 +55,11 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOF, LED0_Pin|LED1_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOC, RELAY_Pin|RELAYC1_Pin|RELAYC2_Pin|RELAYC3_Pin
-                          |RELAYC4_Pin|RELAYC5_Pin|BEEP_Pin|LED2_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOC, RELAY1_Pin|RELAY2_Pin|RELAY3_Pin|RELAY4_Pin
+                          |RELAY5_Pin|RELAY6_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOC, BEEP_Pin|LED2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : LED0_Pin LED1_Pin */
   GPIO_InitStruct.Pin = LED0_Pin|LED1_Pin;
@@ -65,10 +68,10 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RELAY_Pin RELAYC1_Pin RELAYC2_Pin RELAYC3_Pin
-                           RELAYC4_Pin RELAYC5_Pin BEEP_Pin LED2_Pin */
-  GPIO_InitStruct.Pin = RELAY_Pin|RELAYC1_Pin|RELAYC2_Pin|RELAYC3_Pin
-                          |RELAYC4_Pin|RELAYC5_Pin|BEEP_Pin|LED2_Pin;
+  /*Configure GPIO pins : RELAY1_Pin RELAY2_Pin RELAY3_Pin RELAY4_Pin
+                           RELAY5_Pin RELAY6_Pin BEEP_Pin LED2_Pin */
+  GPIO_InitStruct.Pin = RELAY1_Pin|RELAY2_Pin|RELAY3_Pin|RELAY4_Pin
+                          |RELAY5_Pin|RELAY6_Pin|BEEP_Pin|LED2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
