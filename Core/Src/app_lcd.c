@@ -42,6 +42,7 @@
 static uint8_t s_ok;
 static uint8_t s_last_mode = 0xFFu;
 static uint8_t s_last_level = 0xFFu;
+static uint8_t s_last_lv_text = 0xFFu;   /* 已画到屏幕上的等级文字 */
 static uint16_t s_last_pm = 0xFFFFu;
 static uint16_t s_last_th = 0xFFFFu;
 static char s_last_ip[20];
@@ -168,13 +169,23 @@ void app_lcd_update(void)
         (void)snprintf(buf, sizeof(buf), "TH %u", (unsigned)th);
         LCD_ShowString(12u, 314u, 150u, 30u, 24u, (uint8_t *)buf);
 
+        s_last_pm = pm;
+        s_last_th = th;
+        s_last_lv_text = 0xFFu;     /* 上面那次填充把等级区擦掉了，强制重画 */
+    }
+
+    /* 等级可能单独变化（PM 不变，比如回差计时到点解除报警），不能只看 pm/th */
+    if (lv != s_last_lv_text)
+    {
+        LCD_Fill(170u, 314u, 308u, 344u, COL_BG);
+
+        BACK_COLOR = COL_BG;
         POINT_COLOR = (lv == APP_DUST_LEVEL_NORMAL) ? COL_ON
                       : ((lv == APP_DUST_LEVEL_WARN) ? COL_WARN : COL_ALARM);
         LCD_ShowString(170u, 314u, 138u, 30u, 24u, (uint8_t *)app_dust_level_name(lv));
         POINT_COLOR = WHITE;
 
-        s_last_pm = pm;
-        s_last_th = th;
+        s_last_lv_text = (uint8_t)lv;
     }
 
     if (strcmp(ip, s_last_ip) != 0)
@@ -232,6 +243,7 @@ uint8_t app_lcd_init(void)
     s_ok = 1u;
     s_last_mode = 0xFFu;            /* 强制首帧全画 */
     s_last_level = 0xFFu;
+    s_last_lv_text = 0xFFu;
     s_last_pm = 0xFFFFu;
     s_last_th = 0xFFFFu;
     s_last_ip[0] = '\0';
