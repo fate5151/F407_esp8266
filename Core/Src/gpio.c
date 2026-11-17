@@ -55,12 +55,8 @@ void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOF, LED0_Pin|LED1_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  /* 继电器按保存的极性写"断开"电平：低电平触发的模块若初值写 RESET，
-     输出使能瞬间会全吸合。PC3~PC5 是空余通道，一起拉到断开电平 */
   HAL_GPIO_WritePin(GPIOC, RELAY_Pin|RELAYC1_Pin|RELAYC2_Pin|RELAYC3_Pin
-                          |RELAYC4_Pin|RELAYC5_Pin,
-                    (GPIO_PinState)app_relay_off_level());
-  HAL_GPIO_WritePin(GPIOC, BEEP_Pin|LED2_Pin, GPIO_PIN_RESET);
+                          |RELAYC4_Pin|RELAYC5_Pin|BEEP_Pin|LED2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : LED0_Pin LED1_Pin */
   GPIO_InitStruct.Pin = LED0_Pin|LED1_Pin;
