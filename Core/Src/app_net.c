@@ -65,6 +65,19 @@ static uint16_t s_owed;               /* ESP 还在等我们发多少字节（CI
 static uint16_t s_purge_left;         /* 强灌填充的剩余字节数，0 = 未启用 */
 static uint8_t  s_purge_tried;        /* 本轮已尝试过强灌，避免死循环 */
 
+/* 网络看门狗：ESP 的 CIPSERVER 只有几个连接槽，若 CIPCLOSE 没落实（客户端
+   提前断开、两客户端抢 socket），僵尸 link 会占满槽位，表现为 ping 通、
+   网页全超时。长时间收不到任何串口数据时先 AT+CIPSTATUS 探一下：
+     STATUS:3 = 还有链路挂着 → 30 s 没数据说明是僵尸 link，重建服务器清掉
+     有 OK 但没 STATUS:3 → 没有链路（不同固件空闲时可能报 2 或 4），健康
+     STATUS:0 / STATUS:5 → 掉出 AP，重新连接
+*/
+#define NET_WATCHDOG_MS   30000u
+#define NET_PROBE_MS      600u
+#define NET_REBUILD_MS    800u
+static uint32_t s_last_activity;
+static uint8_t  s_rebuild_step;
+
 /* CIPSEND 单包上限 2048，灌超过它必能凑满模块要的量；
    多出来的空行（'\r'）模块会当没有命令而忽略 */
 #define NET_PURGE_BYTES 2100u
@@ -241,6 +254,7 @@ static void net_drop_response(uint16_t mark, uint16_t tok_off, size_t tok_len)
 static void net_drain(void)
 {
     char chunk[64];
+    uint8_t got = 0u;
 
     while (s_ring_tail != s_ring_head)
     {
@@ -259,6 +273,13 @@ static void net_drain(void)
         }
 
         stream_append(chunk, n);
+        got = 1u;
+    }
+
+    /* 模块只要还在说话（+IPD / CONNECT / CLOSED / AT 回显都算），就看门狗不咬 */
+    if (got)
+    {
+        s_last_activity = HAL_GetTick();
     }
 }
 
@@ -269,6 +290,11 @@ static void net_enter(app_net_state_t st)
     s_state = st;
     s_waiting = 0u;
     s_retry = 0u;
+
+    if (st == APP_NET_RUN)
+    {
+        s_last_activity = HAL_GetTick();   /* 刚进 RUN 别立刻被看门狗咬 */
+    }
 }
 
 static void net_issue(const char *cmd, uint32_t timeout_ms)
@@ -885,6 +911,101 @@ void app_net_task(void)
         else
         {
             net_parse_ipd();
+
+            /* 30 s 没收到模块任何数据：可能是没人访问（正常），也可能是
+               僵尸 link 占满连接槽。先探一下再决定，别盲目重建 */
+            if (s_state == APP_NET_RUN &&
+                (HAL_GetTick() - s_last_activity) >= NET_WATCHDOG_MS)
+            {
+                s_mark = s_stream_len;       /* 保护已到达的客户端数据 */
+                net_send("AT+CIPSTATUS\r\n");
+                s_deadline = HAL_GetTick() + NET_PROBE_MS;
+                s_waiting = 1u;
+                s_retry = 0u;
+                s_state = APP_NET_PROBE;
+            }
+        }
+        break;
+
+    case APP_NET_PROBE:
+    {
+        uint16_t st3 = net_find_after(s_mark, "STATUS:3");
+        uint16_t st0 = net_find_after(s_mark, "STATUS:0");
+        uint16_t st5 = net_find_after(s_mark, "STATUS:5");
+        uint16_t ok = net_find_after(s_mark, "OK");
+
+        if (st3 != NET_NOT_FOUND)
+        {
+            /* 还有链路挂着，但 30 s 一个字节都没来 → 僵尸 link，清掉 */
+            dbg_write("net: stale links detected, rebuilding server\r\n");
+            s_rebuild_step = 0u;
+            s_retry = 0u;
+            stream_drop_range(s_mark, s_stream_len);
+            net_enter(APP_NET_REBUILD);
+        }
+        else if (st0 != NET_NOT_FOUND || st5 != NET_NOT_FOUND)
+        {
+            dbg_write("net: module lost AP, reconnecting\r\n");
+            stream_clear();
+            net_enter(APP_NET_FAILED);
+        }
+        else if (ok != NET_NOT_FOUND)
+        {
+            /* 没有链路（空闲时有的固件报 STATUS:2，有的报 STATUS:4）→ 健康 */
+            s_last_activity = HAL_GetTick();
+            stream_drop_range(s_mark, s_stream_len);   /* 清掉探针回显 */
+            net_enter(APP_NET_RUN);
+        }
+        else if (net_timeout())
+        {
+            /* 连 CIPSTATUS 都不回：模块可能卡在等 CIPSEND 数据，走强灌 */
+            dbg_write("net: probe no answer, purging\r\n");
+            stream_clear();
+            s_purge_tried = 1u;
+            s_purge_left = NET_PURGE_BYTES;
+            net_enter(APP_NET_PURGE);
+        }
+        break;
+    }
+
+    case APP_NET_REBUILD:
+        if (!s_waiting)
+        {
+            if (s_rebuild_step >= 3u)
+            {
+                s_last_activity = HAL_GetTick();
+                dbg_write("net: server rebuilt\r\n");
+                net_enter(APP_NET_RUN);
+                break;
+            }
+
+            if (s_rebuild_step == 0u)
+            {
+                net_issue("AT+CIPCLOSE=5\r\n", NET_REBUILD_MS);
+            }
+            else if (s_rebuild_step == 1u)
+            {
+                net_issue("AT+CIPSERVER=0\r\n", NET_REBUILD_MS);
+            }
+            else
+            {
+                net_issue("AT+CIPSERVER=1,80\r\n", NET_REBUILD_MS + 400u);
+            }
+            s_rebuild_step++;
+        }
+        else if (net_timeout())
+        {
+            /* AT 都没人应 → 不只是 link 问题，模块可能卡在等 CIPSEND 数据，
+               直接进强灌流程把它顶出来 */
+            dbg_write("net: rebuild got no answer, purging\r\n");
+            s_purge_tried = 1u;
+            s_purge_left = NET_PURGE_BYTES;
+            net_enter(APP_NET_PURGE);
+        }
+        else if (net_has("OK\r\n") || net_has("ERROR") || net_has("link is not valid") ||
+                 net_has("no change"))
+        {
+            s_waiting = 0u;
         }
         break;
 
@@ -1096,6 +1217,8 @@ uint8_t app_net_start(const char *ssid, const char *pwd)
     s_owed = 0u;
     s_purge_left = 0u;
     s_purge_tried = 0u;
+    s_rebuild_step = 0u;
+    s_last_activity = HAL_GetTick();
     stream_clear();
     net_enter(APP_NET_CLEAN);
     dbg_printf("net: connecting to '%s' ...\r\n", s_ssid);
@@ -1142,6 +1265,8 @@ const char *app_net_state_name(app_net_state_t st)
     case APP_NET_CLOSING:
     case APP_NET_RECOVER:
     case APP_NET_PURGE:
+    case APP_NET_PROBE:
+    case APP_NET_REBUILD:
         return "SENDING";
     case APP_NET_FAILED:
         return "FAILED";
