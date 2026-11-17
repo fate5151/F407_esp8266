@@ -46,7 +46,6 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     Core/Src/app_relay.c
-    Core/Src/app_dim.c
     Core/Src/app_dust.c
     Core/Src/app_alarm.c
     Core/Src/app_cmd.c

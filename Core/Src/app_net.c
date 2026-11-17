@@ -12,7 +12,6 @@
   *   GET /relay?ch=1&on=1     单路开/关
   *   GET /toggle?ch=1         单路翻转
   *   GET /all?m=63            按位掩码设置 6 路
-  *   GET /dim?ch=1&v=50       调光 0~100%
   *   GET /th?v=150            报警阈值
   ******************************************************************************
   */
@@ -20,7 +19,6 @@
 #include "app_net.h"
 #include "app_cfg.h"
 #include "app_dbg.h"
-#include "app_dim.h"
 #include "app_dust.h"
 #include "app_relay.h"
 #include "app_util.h"
@@ -395,13 +393,8 @@ static void page_build(void)
                (unsigned)(i + 1u), on ? "OFF" : "ON");
     }
 
-    body_add("</table><p>DIM1: ");
-    body_add("<a href=\"/dim?ch=1&v=0\">0%%</a> <a href=\"/dim?ch=1&v=50\">50%%</a> "
-           "<a href=\"/dim?ch=1&v=100\">100%%</a> (%u%%)", (unsigned)app_dim_get(1u));
-    body_add("<br>DIM2: ");
-    body_add("<a href=\"/dim?ch=2&v=0\">0%%</a> <a href=\"/dim?ch=2&v=50\">50%%</a> "
-           "<a href=\"/dim?ch=2&v=100\">100%%</a> (%u%%)", (unsigned)app_dim_get(2u));
-    body_add("<p>TH: <a href=\"/th?v=100\">100</a> <a href=\"/th?v=150\">150</a> "
+        body_add("</table>");
+body_add("<p>TH: <a href=\"/th?v=100\">100</a> <a href=\"/th?v=150\">150</a> "
            "<a href=\"/th?v=200\">200</a>");
     body_add("<p><a href=\"/all?m=0\">ALL OFF</a> &nbsp; <a href=\"/all?m=63\">ALL ON</a>");
     body_add("</body></html>");
@@ -486,14 +479,7 @@ static void http_handle(const char *data, uint16_t len)
         app_relay_set_mode((uint8_t)v);
         tx_http_redirect();
     }
-    else if (strncmp(path, "/dim?", 5u) == 0 &&
-             query_get(path + 5, "ch", &v) && query_get(path + 5, "v", &w) &&
-             v >= 1u && v <= APP_DIM_COUNT && w <= 100u)
-    {
-        app_dim_set((uint8_t)v, (uint8_t)w);
-        tx_http_redirect();
-    }
-    else if (strncmp(path, "/th?", 4u) == 0 && query_get(path + 4, "v", &v))
+        else if (strncmp(path, "/th?", 4u) == 0 && query_get(path + 4, "v", &v))
     {
         app_dust_set_threshold(v);
         tx_http_redirect();

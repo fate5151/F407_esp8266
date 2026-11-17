@@ -8,7 +8,6 @@
   *    mode <0-63|0x00-0x3F> set all 6 relays by bitmask
   *    relay <ch> <0|1>      switch one relay (ch 1-6)
   *    toggle <ch>           flip one relay (ch 1-6)
-  *    dim <ch> <0-100>      dimmer duty in percent (ch 1-2)
   *    th <ug/m3>            dust alarm threshold (10-1000)
   *    ui <0|1>              1 Hz status line on/off
   ******************************************************************************
@@ -17,7 +16,6 @@
 #include "app_cmd.h"
 #include "app_cfg.h"
 #include "app_dbg.h"
-#include "app_dim.h"
 #include "app_dust.h"
 #include "app_lcd.h"
 #include "app_net.h"
@@ -53,7 +51,6 @@ static void cmd_help(void)
               "  mode <0-63|0x00-0x3F> set all 6 relays by bitmask\r\n"
               "  relay <ch> <0|1>      switch one relay (ch 1-6)\r\n"
               "  toggle <ch>           flip one relay (ch 1-6)\r\n"
-              "  dim <ch> <0-100>      dimmer duty in percent (ch 1-2)\r\n"
               "  th <ug/m3>            dust alarm threshold (10-1000)\r\n"
               "  ui <0|1>              1 Hz status line on/off\r\n"
               "  blink <ch>            toggle one relay at 1 Hz (0 = stop)\r\n"
@@ -165,18 +162,7 @@ static void cmd_exec(char *line)
         app_relay_toggle((uint8_t)v);
         dbg_printf("OK mode=0x%02X\r\n", (unsigned int)app_relay_mode());
     }
-    else if (strcmp(argv[0], "dim") == 0)
-    {
-        if (argc < 3u || !app_parse_u16(argv[1], &v) || !app_parse_u16(argv[2], &w) ||
-            v < 1u || v > APP_DIM_COUNT || w > 100u)
-        {
-            dbg_write("ERR dim <ch 1-2> <0-100>\r\n");
-            return;
-        }
-        app_dim_set((uint8_t)v, (uint8_t)w);
-        dbg_printf("OK dim%d=%u%%\r\n", (unsigned int)v, (unsigned int)app_dim_get((uint8_t)v));
-    }
-    else if (strcmp(argv[0], "th") == 0)
+        else if (strcmp(argv[0], "th") == 0)
     {
         if (argc < 2u || !app_parse_u16(argv[1], &v))
         {

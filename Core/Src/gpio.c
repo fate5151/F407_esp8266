@@ -54,12 +54,9 @@ void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOF, LED0_Pin|LED1_Pin, GPIO_PIN_SET);
 
-  /* 手动修改：继电器引脚按保存的极性输出"断开"电平，避免低电平触发模块在
-     输出使能瞬间误吸合（CubeMX 重新生成 gpio.c 后需要再改一次） */
+  /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, RELAY_Pin|RELAYC1_Pin|RELAYC2_Pin|RELAYC3_Pin
-                          |RELAYC4_Pin|RELAYC5_Pin, (GPIO_PinState)app_relay_off_level());
-
-  HAL_GPIO_WritePin(GPIOC, BEEP_Pin|LED2_Pin, GPIO_PIN_RESET);
+                          |RELAYC4_Pin|RELAYC5_Pin|BEEP_Pin|LED2_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : LED0_Pin LED1_Pin */
   GPIO_InitStruct.Pin = LED0_Pin|LED1_Pin;

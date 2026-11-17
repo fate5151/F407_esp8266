@@ -9,11 +9,9 @@
 
 #include "app_ui.h"
 #include "app_dbg.h"
-#include "app_dim.h"
 #include "app_dust.h"
 #include "app_net.h"
 #include "app_relay.h"
-#include "main.h"
 
 /* 板载 LED：DS0 = PF9，DS1 = PF10，这块板是低电平亮 */
 #define LED0_ON()  HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_RESET)
@@ -78,15 +76,13 @@ void app_ui_print_status(void)
     }
     bits[APP_RELAY_COUNT] = '\0';
 
-    dbg_printf("%5lus PM=%3u TH=%3u %-6s RELAY=0x%02X [%s] DIM=%3u%%/%3u%% NET=%s %s\r\n",
+    dbg_printf("%5lus PM=%3u TH=%3u %-6s RELAY=0x%02X [%s] NET=%s %s\r\n",
                (unsigned long)(HAL_GetTick() / 1000u),
                (unsigned int)app_dust_pm(),
                (unsigned int)app_dust_threshold(),
                app_dust_level_name(app_dust_level()),
                (unsigned int)mode,
                bits,
-               (unsigned int)app_dim_get(1u),
-               (unsigned int)app_dim_get(2u),
                app_net_state_name(app_net_state()),
                app_net_ip());
 }

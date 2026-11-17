@@ -1,29 +1,27 @@
 # F407_esp8266
 
-STM32F407ZGTx（正点原子探索者 V2.61）上的「6 路继电器 + 2 路调光 + 粉尘监测报警」工程，
+STM32F407ZGTx（正点原子探索者 V2.61）上的「6 路继电器 + 触摸屏 + WiFi 远程 + 粉尘监测报警」工程，
 CubeMX 生成的 CMake 工程，HAL 库 + arm-none-eabi-gcc，VS Code + Cortex-Debug + pyOCD 烧录。
 
 ## 硬件与外设
 
 | 功能 | 外设 | 引脚 | 关键参数 |
 |---|---|---|---|
-| 6 路继电器 | GPIO 输出 | PC0~PC5 | 高电平吸合 |
-| 2 路调光 | TIM8_CH1/CH2 | PC6 / PC7 | 1 kHz（PSC 83、ARR 999） |
+| 6 路继电器 | GPIO 输出 | PC0~PC5 | 低/高电平触发可切换（存 Flash） |
 | 蜂鸣器 | GPIO | PC8 | 经 S8050，高电平响 |
 | 状态灯 | GPIO | PC9 | 高电平亮 |
-| 粉尘 ADC | ADC1_IN0 | PA0 | 12 bit、480 cycles、TIM3_TRGO 下降沿触发 |
+| 粉尘 ADC | ADC1_IN4 | PA4 | 12 bit、480 cycles、TIM3_TRGO 下降沿触发 |
 | 传感器 LED | TIM3_CH1 | PA6 | 10 ms 周期 / 320 µs 脉冲 |
 | 采样点 | TIM3_CH2 | PA7 | 280 µs 处，TRGO = OC2REF |
 | 调试串口 | USART1 | PA9 / PA10 | 115200 8N1 |
 | WiFi 模块 | USART3 | PB10 / PB11 | 115200 8N1（ATK-MW8266D 插座） |
 | 板载 LED | GPIO | PF9 / PF10 | 低电平亮（DS0 心跳 / DS1 网络就绪） |
-| **3.5" TFTLCD** | FSMC NE4 | PD/PE/PF12/PG12 + PB15 背光 | NT35310，480×320，界面见 T7 |
+| **3.5" TFTLCD** | FSMC NE4 | PD/PE/PF12/PG12 + PB15 背光 | NT35310，320×480 竖屏，XPT2046 触摸 |
 
 ## 代码结构
 
 ```
 Core/Src/app_relay.c   6 路继电器位掩码（模式号 0~63）
-Core/Src/app_dim.c     TIM8 两路调光 0~100%
 Core/Src/app_dust.c    ADC 采样 → 9 点中位数 → PM 换算 → 回差报警状态机
 Core/Src/app_alarm.c   蜂鸣器 + 状态灯报警指示，ALARM 时自动开排风 CH2
 Core/Src/app_net.c     ESP8266（USART3）AT 联网 + HTTP 服务器，浏览器远程控制
@@ -67,30 +65,35 @@ mode <0-63|0x3F>      按位掩码一次性设置 6 路继电器
 relay <ch> <0|1>      单路开/关，ch 1~6
 toggle <ch>           单路翻转
 blink <ch|0>          某路 1 Hz 点动（听声音/量通断），0 = 停
-dim <ch> <0-100>      调光占空比，ch 1~2
+relaypol <0|1>        0=高电平触发，1=低电平触发（存 Flash）
 th <ug/m3>            粉尘报警阈值（默认 150）
 ui <0|1>              每秒状态行开关
-wifi <ssid> <pwd>     连 WiFi 并开 80 端口 HTTP 服务器
+touch <cal|raw|poll|info>  触摸校准 / 读原始值 / 轮询 / 状态
+wifi <ssid> <pwd>     连 WiFi 并开 80 端口 HTTP 服务器（存 Flash）
 net <stop|status>     停网络 / 看状态和 IP
+forget                清除保存的 WiFi 账号
+at <AT...>            原始 AT 透传（调试）
 ```
 
 状态行示例：
 
 ```
-   12s PM= 35 TH=150 NORMAL RELAY=0x05 [101000] DIM= 50%/  0% NET=READY 192.168.1.23
+   12s PM= 35 TH=150 NORMAL RELAY=0x05 [101000] NET=READY 192.168.1.23
 ```
 
-## 远程控制（ESP8266，T8/T9）```powershell
+## 远程控制（ESP8266，T8/T9）
+
+```powershell
 # 串口里
 wifi MyHome_2.4G 12345678
 # → net: joined 'MyHome_2.4G'
 # → net: server ready at http://192.168.1.23/
 ```
 
-手机连同一个 WiFi，浏览器打开该 IP：页面每 3 秒刷新，可翻转 CH1~CH6、设调光 0/50/100%、
+手机连同一个 WiFi，浏览器打开该 IP：页面每 3 秒刷新，可翻转 CH1~CH6、
 改报警阈值；PM 超阈值页面标红，并自动闭合 CH2（排风），解除后恢复 CH2 原状态。
 
-也可以直接打接口：`/relay?ch=1&on=1`、`/toggle?ch=1`、`/all?m=63`、`/dim?ch=1&v=50`、`/th?v=150`。
+也可以直接打接口：`/relay?ch=1&on=1`、`/toggle?ch=1`、`/all?m=63`、`/th?v=150`。
 
 > 说明：ESP8266 只支持 2.4 GHz WiFi；AT 固件走 USART3（115200）。
 
@@ -99,7 +102,7 @@ wifi MyHome_2.4G 12345678
 - ✅ 外设配置、CMake 工程、业务代码骨架（编译零告警）
 - ✅ T7 显示：3.5 寸 TFTLCD（NT35310 / 320×480 竖屏 / FSMC NE4），屏上显示 6 路状态 + PM + 阈值 + 网络
 - ✅ 触摸控制：点屏幕方块翻转对应继电器，点 ALL OFF 全断（XPT2046，4 点校准存 Flash）
-- ✅ 远程控制：ESP8266 AT 联网 + HTTP 页面控制 6 路继电器 / 调光 / 阈值（T8/T9）；
+- ✅ 远程控制：ESP8266 AT 联网 + HTTP 页面控制 6 路继电器 / 阈值（T8/T9）；
   手机实测页面正常、点按钮继电器动作；WiFi 账号掉电保存 + 热点断开自动重连
 - ⏳ T1~T6、T9 联动上板实测（逐项验证流程见 [开发指南.md](开发指南.md)）
 

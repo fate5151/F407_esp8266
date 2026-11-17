@@ -28,7 +28,6 @@
 #include "app_alarm.h"
 #include "app_cmd.h"
 #include "app_dbg.h"
-#include "app_dim.h"
 #include "app_dust.h"
 #include "app_cfg.h"
 #include "app_lcd.h"
@@ -62,6 +61,7 @@
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
+static void on_touch_click(uint16_t x, uint16_t y);
 
 /* USER CODE END PFP */
 
@@ -69,25 +69,6 @@ void SystemClock_Config(void);
 /* USER CODE BEGIN 0 */
 
 /* USER CODE END 0 */
-
-/* 触摸点击：点继电器方块 = 翻转该路，点 ALL OFF = 全断 */
-static void on_touch_click(uint16_t x, uint16_t y)
-{
-  uint8_t hit = app_lcd_hit_test(x, y);
-
-  if (hit >= 1u && hit <= APP_RELAY_COUNT)
-  {
-    app_relay_toggle(hit);
-    dbg_printf("touch: CH%u -> %s (mode=0x%02X)\r\n", (unsigned)hit,
-               ((app_relay_mode() >> (hit - 1u)) & 1u) ? "ON" : "OFF",
-               (unsigned)app_relay_mode());
-  }
-  else if (hit == APP_LCD_BTN_ALL_OFF)
-  {
-    app_relay_set_mode(0u);
-    dbg_write("touch: ALL OFF\r\n");
-  }
-}
 
 /**
   * @brief  The application entry point.
@@ -118,9 +99,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  app_relay_preinit();                        /* 立刻把继电器拉到"断开"电平 */
   MX_USART1_UART_Init();
-  MX_TIM8_Init();
   MX_USART3_UART_Init();
   MX_ADC1_Init();
   MX_TIM3_Init();
@@ -134,11 +113,8 @@ int main(void)
     Error_Handler();
   }
 
-  HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_1);   /* PC6 调光 A */
-  HAL_TIM_PWM_Start(&htim8, TIM_CHANNEL_2);   /* PC7 调光 B */
 
   app_relay_init();                           /* 6 路继电器先全部断开 */
-  app_dim_init();                             /* 两路占空比 0% */
   app_dust_init();
   app_alarm_init();                           /* 蜂鸣器/状态灯静音 */
   app_cmd_init();                             /* USART1 命令接收就绪 */
@@ -228,6 +204,26 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+
+/**
+  * @brief  触摸回调：点继电器方块 → 翻转该路；点 ALL OFF → 全断
+  * @note   屏幕布局坐标由 app_lcd_hit_test() 判定，本函数只管动作
+  */
+static void on_touch_click(uint16_t x, uint16_t y)
+{
+  uint8_t hit = app_lcd_hit_test(x, y);
+
+  if (hit >= 1u && hit <= APP_RELAY_COUNT)
+  {
+    app_relay_toggle(hit);
+    app_lcd_update();
+  }
+  else if (hit == APP_LCD_BTN_ALL_OFF)
+  {
+    app_relay_set_mode(0u);
+    app_lcd_update();
+  }
+}
 
 /* USER CODE END 4 */
 
